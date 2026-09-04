@@ -1,0 +1,79 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Node & Frontend
+node_modules/
+web/dist/
+.output/
+
+# Logs and databases
+*.log
+*.sqlite3
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Secrets & API Keys
+**/config/settings.json
+*.env
+*.env.local
+
+# Heavy Pipeline Storage (Exclude gigabytes of video, separated stems, raw tts)
+one_drama_engine/storage/raw_episodes/*
+!one_drama_engine/storage/raw_episodes/.gitkeep
+one_drama_engine/storage/audio_separated/*
+!one_drama_engine/storage/audio_separated/.gitkeep
+one_drama_engine/storage/tts_output/*
+!one_drama_engine/storage/tts_output/.gitkeep
+one_drama_engine/storage/processed_episodes/*
+!one_drama_engine/storage/processed_episodes/.gitkeep
+one_drama_engine/storage/master_export/*
+!one_drama_engine/storage/master_export/.gitkeep
+one_drama_engine/storage/voice_reference/*.wav
+!one_drama_engine/storage/voice_reference/README.md
+
+# HuggingFace & PyTorch model caches
+*.safetensors
+*.bin
+*.pt
+*.onnx
+
+one_drama_engine/scratch/*
+scratch/*

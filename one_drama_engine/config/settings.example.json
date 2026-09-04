@@ -1,0 +1,86 @@
+{
+  "gemini_api_key": "YOUR_GEMINI_API_KEY",
+  "gemini_model": "gemini-2.5-flash",
+  "gemini_api_keys": [
+    "YOUR_GEMINI_API_KEY_1",
+    "YOUR_GEMINI_API_KEY_2"
+  ],
+  "target_language": "hi",
+  "tts_engine": "f5-tts",
+  "tts_voice": "hi-IN-MadhurNeural",
+  "f5_tts": {
+    "model_name": "F5-TTS",
+    "ref_audio_path": "storage/voice_reference/narrator_ref.wav",
+    "ref_text": "इस दुनिया में कमजोर की कोई जगह नहीं है, ताकत ही सब कुछ तय करती है।",
+    "device": "cuda",
+    "speed": 1.0
+  },
+  "asr_engine": "sensevoice",
+  "whisper_model": "medium",
+  "source_language": "zh",
+  "storage_paths": {
+    "raw": "storage/raw_episodes",
+    "separated": "storage/audio_separated",
+    "tts": "storage/tts_output",
+    "processed": "storage/processed_episodes",
+    "master": "storage/master_export"
+  },
+  "visual_filters": {
+    "zoom_percent": 1.04,
+    "crop_bottom": 80,
+    "crop_top": 0,
+    "contrast": 1.05,
+    "saturation": 1.08,
+    "remove_watermark": false,
+    "remove_right_disclaimer": false
+  },
+  "audio_mixing": {
+    "bgm_volume": 0.35,
+    "voice_volume": 1.0
+  },
+  "tts_sync": {
+    "atempo_min": 0.8,
+    "atempo_max": 1.35
+  },
+  "encoding": {
+    "video_codec": "libx264",
+    "audio_codec": "aac",
+    "crf": 20,
+    "preset": "veryfast",
+    "audio_bitrate": "192k",
+    "fps": 30,
+    "sample_rate": 44100
+  },
+  "master_export": {
+    "filename": "full_manhua_movie.mp4",
+    "target_hours_min": 2.0,
+    "target_hours_max": 3.0
+  },
+  "discovery": {
+    "preferred_genres": [
+      "urban",
+      "cultivation",
+      "system",
+      "isekai"
+    ],
+    "min_episodes": 10,
+    "max_episodes": 80,
+    "blocked_franchises": [
+      "斗罗大陆",
+      "斗破苍穹",
+      "完美世界",
+      "吞噬星空",
+      "一念永恒",
+      "遮天",
+      "凡人修仙传",
+      "仙逆",
+      "武动乾坤",
+      "神印王座"
+    ]
+  },
+  "google_drive_sync": {
+    "enabled": true,
+    "destination_folder_name": "OneDrama_Uploads",
+    "custom_drive_path": null
+  }
+}
