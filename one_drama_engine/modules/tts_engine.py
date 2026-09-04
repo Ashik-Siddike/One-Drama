@@ -73,11 +73,18 @@ def initialize_f5_tts(config: dict | None = None):
         ) from exc
 
     f5_cfg = (config or {}).get("f5_tts", {})
-    model_name = f5_cfg.get("model_name", "F5TTS_v1_Base")
-    if model_name == "F5-TTS":
-        model_name = "F5TTS_v1_Base"
+    model_name = f5_cfg.get("model_name", "F5TTS_Small")
+    if model_name in ("F5-TTS", "F5TTS_v1_Base") and os.path.isfile("models/f5_hindi/model_2500000.safetensors"):
+        model_name = "F5TTS_Small"
     ckpt_file = f5_cfg.get("ckpt_file", "")
     vocab_file = f5_cfg.get("vocab_file", "")
+    if ckpt_file and not os.path.isabs(ckpt_file):
+        base = (config or {}).get("_base_dir", "")
+        ckpt_file = os.path.abspath(os.path.join(base, ckpt_file)) if base else os.path.abspath(ckpt_file)
+    if vocab_file and not os.path.isabs(vocab_file):
+        base = (config or {}).get("_base_dir", "")
+        vocab_file = os.path.abspath(os.path.join(base, vocab_file)) if base else os.path.abspath(vocab_file)
+
     device = f5_cfg.get("device")
     if not device:
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -89,6 +96,13 @@ def initialize_f5_tts(config: dict | None = None):
         vocab_file=vocab_file,
         device=device,
     )
+    is_hindi = False
+    if vocab_file and os.path.isfile(vocab_file):
+        with open(vocab_file, "r", encoding="utf-8", errors="ignore") as vf:
+            is_hindi = any("\u0900" <= ch <= "\u097F" for ch in vf.read(2048))
+    setattr(_f5tts_instance, "_is_native_hindi", is_hindi)
+    if is_hindi:
+        log.info("F5-TTS initialized with Native Devanagari Hindi vocabulary (IIT Madras / SPRINGLab)!")
     return _f5tts_instance
 
 
@@ -100,16 +114,19 @@ def _synthesize_one_f5(
     ref_text: str,
     speed: float = 1.0,
 ) -> bool:
-    """Synthesize one segment with F5-TTS using phonetic Latin/Hinglish transliteration for Hindi."""
-    import unidecode
+    """Synthesize one segment with F5-TTS (native Devanagari for Hindi-trained models, transliterated for base)."""
     import soundfile as sf
 
-    # Base F5-TTS vocabulary uses Latin characters; convert Devanagari Hindi if present
-    has_devanagari = any("\u0900" <= ch <= "\u097F" for ch in text)
-    gen_text = unidecode.unidecode(text).strip() if has_devanagari else text.strip()
-
-    has_ref_devanagari = any("\u0900" <= ch <= "\u097F" for ch in ref_text)
-    clean_ref_text = unidecode.unidecode(ref_text).strip() if has_ref_devanagari else ref_text.strip()
+    is_native_hindi = getattr(f5tts, "_is_native_hindi", False)
+    if is_native_hindi:
+        gen_text = text.strip()
+        clean_ref_text = ref_text.strip()
+    else:
+        import unidecode
+        has_devanagari = any("\u0900" <= ch <= "\u097F" for ch in text)
+        gen_text = unidecode.unidecode(text).strip() if has_devanagari else text.strip()
+        has_ref_devanagari = any("\u0900" <= ch <= "\u097F" for ch in ref_text)
+        clean_ref_text = unidecode.unidecode(ref_text).strip() if has_ref_devanagari else ref_text.strip()
 
     try:
         wav, sr, _ = f5tts.infer(
@@ -117,6 +134,7 @@ def _synthesize_one_f5(
             ref_text=clean_ref_text,
             gen_text=gen_text,
             speed=speed,
+            show_info=lambda *args: None,
             file_wave=output_path,
         )
         if not os.path.isfile(output_path):

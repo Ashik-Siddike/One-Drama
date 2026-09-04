@@ -9,7 +9,9 @@
   "tts_engine": "f5-tts",
   "tts_voice": "hi-IN-MadhurNeural",
   "f5_tts": {
-    "model_name": "F5-TTS",
+    "model_name": "F5TTS_Small",
+    "ckpt_file": "models/f5_hindi/model_2500000.safetensors",
+    "vocab_file": "models/f5_hindi/vocab.txt",
     "ref_audio_path": "storage/voice_reference/narrator_ref.wav",
     "ref_text": "इस दुनिया में कमजोर की कोई जगह नहीं है, ताकत ही सब कुछ तय करती है।",
     "device": "cuda",
