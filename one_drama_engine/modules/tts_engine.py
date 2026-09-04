@@ -58,8 +58,12 @@ KNOWN_VOICES: dict[str, tuple[str, ...]] = {
 _f5tts_instance = None
 
 
+DEFAULT_HINDI_CKPT = "models/f5_hindi/model_2500000.safetensors"
+DEFAULT_HINDI_VOCAB = "models/f5_hindi/vocab.txt"
+
+
 def initialize_f5_tts(config: dict | None = None):
-    """Lazily load the F5-TTS model on GPU/CUDA for emotional voice cloning."""
+    """Load the dedicated IIT Madras Native Hindi F5-TTS model on GPU/CUDA."""
     global _f5tts_instance
     if _f5tts_instance is not None:
         return _f5tts_instance
@@ -73,36 +77,34 @@ def initialize_f5_tts(config: dict | None = None):
         ) from exc
 
     f5_cfg = (config or {}).get("f5_tts", {})
-    model_name = f5_cfg.get("model_name", "F5TTS_Small")
-    if model_name in ("F5-TTS", "F5TTS_v1_Base") and os.path.isfile("models/f5_hindi/model_2500000.safetensors"):
-        model_name = "F5TTS_Small"
-    ckpt_file = f5_cfg.get("ckpt_file", "")
-    vocab_file = f5_cfg.get("vocab_file", "")
-    if ckpt_file and not os.path.isabs(ckpt_file):
-        base = (config or {}).get("_base_dir", "")
+    base = (config or {}).get("_base_dir", "")
+
+    ckpt_file = f5_cfg.get("ckpt_file") or DEFAULT_HINDI_CKPT
+    vocab_file = f5_cfg.get("vocab_file") or DEFAULT_HINDI_VOCAB
+
+    if not os.path.isabs(ckpt_file):
         ckpt_file = os.path.abspath(os.path.join(base, ckpt_file)) if base else os.path.abspath(ckpt_file)
-    if vocab_file and not os.path.isabs(vocab_file):
-        base = (config or {}).get("_base_dir", "")
+    if not os.path.isabs(vocab_file):
         vocab_file = os.path.abspath(os.path.join(base, vocab_file)) if base else os.path.abspath(vocab_file)
+
+    if not os.path.isfile(ckpt_file) or not os.path.isfile(vocab_file):
+        raise PipelineError(
+            f"IIT Madras Hindi F5-TTS model files not found at '{ckpt_file}'. "
+            "Please ensure model_2500000.safetensors and vocab.txt are in models/f5_hindi/."
+        )
 
     device = f5_cfg.get("device")
     if not device:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    log.info("Loading F5-TTS model '%s' on %s (Diffusion Flow Matching)...", model_name, device)
+    log.info("Loading IIT Madras Native Hindi F5-TTS model on %s (Diffusion Flow Matching)...", device)
     _f5tts_instance = F5TTS(
-        model=model_name,
+        model="F5TTS_Small",
         ckpt_file=ckpt_file,
         vocab_file=vocab_file,
         device=device,
     )
-    is_hindi = False
-    if vocab_file and os.path.isfile(vocab_file):
-        with open(vocab_file, "r", encoding="utf-8", errors="ignore") as vf:
-            is_hindi = any("\u0900" <= ch <= "\u097F" for ch in vf.read(2048))
-    setattr(_f5tts_instance, "_is_native_hindi", is_hindi)
-    if is_hindi:
-        log.info("F5-TTS initialized with Native Devanagari Hindi vocabulary (IIT Madras / SPRINGLab)!")
+    log.info("F5-TTS initialized with Native Devanagari Hindi (IIT Madras / SPRINGLab)!")
     return _f5tts_instance
 
 
@@ -114,19 +116,11 @@ def _synthesize_one_f5(
     ref_text: str,
     speed: float = 1.0,
 ) -> bool:
-    """Synthesize one segment with F5-TTS (native Devanagari for Hindi-trained models, transliterated for base)."""
+    """Synthesize one segment with pure native Devanagari Hindi using IIT Madras F5-TTS."""
     import soundfile as sf
 
-    is_native_hindi = getattr(f5tts, "_is_native_hindi", False)
-    if is_native_hindi:
-        gen_text = text.strip()
-        clean_ref_text = ref_text.strip()
-    else:
-        import unidecode
-        has_devanagari = any("\u0900" <= ch <= "\u097F" for ch in text)
-        gen_text = unidecode.unidecode(text).strip() if has_devanagari else text.strip()
-        has_ref_devanagari = any("\u0900" <= ch <= "\u097F" for ch in ref_text)
-        clean_ref_text = unidecode.unidecode(ref_text).strip() if has_ref_devanagari else ref_text.strip()
+    gen_text = text.strip()
+    clean_ref_text = ref_text.strip()
 
     try:
         wav, sr, _ = f5tts.infer(
