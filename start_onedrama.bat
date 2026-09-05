@@ -1,5 +1,6 @@
 @echo off
 title OneDrama AI Studio
+color 0B
 cd /d "%~dp0"
 
 if exist "one_drama_engine\.venv\Scripts\python.exe" (
@@ -10,6 +11,7 @@ if exist "one_drama_engine\.venv\Scripts\python.exe" (
 
 if %ERRORLEVEL% NEQ 0 (
     echo.
-    echo An error occurred while launching OneDrama Studio.
+    color 0C
+    echo [ERROR] An error occurred while launching OneDrama Studio.
     pause
 )

@@ -1,10 +1,10 @@
-"""OneDrama Studio - Master Desktop Launcher & Process Manager.
+"""OneDrama Studio - Master Desktop Launcher & Simultaneous Process Orchestrator.
 
-Orchestrates:
-1. FastAPI Backend Engine (Port 8000)
-2. Vite React Frontend Studio (Port 5173)
-3. Auto-launching the system default browser
-4. Graceful shutdown on exit
+Simultaneously launches:
+1. FastAPI Backend Engine (http://127.0.0.1:8000)
+2. Vite React Frontend Studio (http://localhost:5173)
+3. Auto-opens System Browser (http://localhost:5173)
+4. Monitors health and handles graceful shutdown
 """
 
 import os
@@ -13,6 +13,7 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.request
 import webbrowser
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -33,91 +34,133 @@ BANNER = r"""
 ========================================================================
 """
 
+
 def is_port_in_use(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.settimeout(0.6)
+        s.settimeout(0.5)
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
-def wait_for_port(port: int, timeout: float = 15.0) -> bool:
-    start = time.time()
-    while time.time() - start < timeout:
-        if is_port_in_use(port):
-            return True
-        time.sleep(0.5)
-    return False
+def check_backend_healthy() -> bool:
+    try:
+        req = urllib.request.Request("http://127.0.0.1:8000/api/health", headers={"User-Agent": "OneDramaLauncher"})
+        with urllib.request.urlopen(req, timeout=1.0) as res:
+            return res.status == 200
+    except Exception:
+        return False
+
+
+def check_frontend_healthy() -> bool:
+    try:
+        req = urllib.request.Request("http://localhost:5173", headers={"User-Agent": "OneDramaLauncher"})
+        with urllib.request.urlopen(req, timeout=1.0) as res:
+            return res.status in (200, 304)
+    except Exception:
+        return False
 
 
 def main():
     print(BANNER)
-    procs = []
+    spawned_procs = []
 
-    # 1. Check / Start Backend
+    # ----------------------------------------------------------------------- #
+    # 1. Start / Check FastAPI Backend Engine (Port 8000)
+    # ----------------------------------------------------------------------- #
+    print(" [1/3] Initializing Backend Engine (FastAPI)...")
     if is_port_in_use(8000):
-        print(" [✓] FastAPI Backend Engine is already running on http://127.0.0.1:8000")
+        print("       -> Backend is already active on http://127.0.0.1:8000")
     else:
-        print(" [>] Starting FastAPI Engine (one_drama_engine/server.py)...")
-        backend_proc = subprocess.Popen(
+        print("       -> Starting Python FastAPI server (server.py)...")
+        b_flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+        b_proc = subprocess.Popen(
             [VENV_PYTHON, "server.py"],
             cwd=ENGINE_DIR,
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
+            creationflags=b_flags,
         )
-        procs.append(("Backend", backend_proc))
-        if wait_for_port(8000, 15.0):
-            print(" [✓] FastAPI Backend Engine online at http://127.0.0.1:8000")
-        else:
-            print(" [!] Warning: Backend is taking longer than usual to bind port 8000.")
+        spawned_procs.append(("FastAPI Backend", b_proc))
 
-    # 2. Check / Start Frontend
+    # ----------------------------------------------------------------------- #
+    # 2. Start / Check Vite React Frontend (Port 5173)
+    # ----------------------------------------------------------------------- #
+    print(" [2/3] Initializing Frontend Studio (Vite React)...")
     if is_port_in_use(5173):
-        print(" [✓] Vite Frontend Studio is already running on http://localhost:5173")
+        print("       -> Frontend Studio is already active on http://localhost:5173")
     else:
-        print(" [>] Starting Vite Dev Studio (web/)...")
-        # Use npm.cmd on Windows
+        print("       -> Starting Vite dev server (npm run dev)...")
         npm_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
-        frontend_proc = subprocess.Popen(
+        f_flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+        f_proc = subprocess.Popen(
             [npm_cmd, "run", "dev"],
             cwd=WEB_DIR,
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
+            shell=True if sys.platform == "win32" else False,
+            creationflags=f_flags,
         )
-        procs.append(("Frontend", frontend_proc))
-        if wait_for_port(5173, 15.0):
-            print(" [✓] Vite Frontend Studio online at http://localhost:5173")
-        else:
-            print(" [!] Warning: Frontend is taking longer than usual to bind port 5173.")
+        spawned_procs.append(("Vite Frontend", f_proc))
 
-    # 3. Open Browser
+    # ----------------------------------------------------------------------- #
+    # 3. Concurrently Wait for Both Ports to Respond
+    # ----------------------------------------------------------------------- #
+    print(" [3/3] Synchronizing services on localhost...")
+    max_wait = 20.0
+    start_time = time.time()
+    backend_ready = is_port_in_use(8000)
+    frontend_ready = is_port_in_use(5173)
+
+    while (not backend_ready or not frontend_ready) and (time.time() - start_time < max_wait):
+        if not backend_ready:
+            backend_ready = is_port_in_use(8000)
+        if not frontend_ready:
+            frontend_ready = is_port_in_use(5173)
+        time.sleep(0.4)
+
+    if backend_ready:
+        print("       ✓ Backend Engine Online  -> http://127.0.0.1:8000")
+    else:
+        print("       ! Backend still starting up in background...")
+
+    if frontend_ready:
+        print("       ✓ Frontend Studio Online -> http://localhost:5173")
+    else:
+        print("       ! Frontend still starting up in background...")
+
+    # ----------------------------------------------------------------------- #
+    # 4. Auto-Launch Default Browser
+    # ----------------------------------------------------------------------- #
     studio_url = "http://localhost:5173"
-    print(f"\n [🚀] Opening OneDrama Studio in your browser: {studio_url}\n")
-    time.sleep(1.0)
+    print(f"\n [🚀] Launching OneDrama Studio in your browser: {studio_url}\n")
+    time.sleep(0.5)
     webbrowser.open(studio_url)
 
-    print("------------------------------------------------------------------------")
-    print(" Studio is active and ready for production!")
-    print(" Keep this terminal open while using OneDrama.")
-    print(" Press Ctrl + C in this terminal anytime to exit.")
-    print("------------------------------------------------------------------------\n")
+    print("========================================================================")
+    print("       🌟 ONEDRAMA AI STUDIO IS LIVE ON LOCALHOST 🌟")
+    print("========================================================================")
+    print("   • Frontend UI   : http://localhost:5173")
+    print("   • Backend API   : http://127.0.0.1:8000")
+    print("   • API Swagger   : http://127.0.0.1:8000/docs")
+    print("========================================================================")
+    print("   Keep this window open while using OneDrama.")
+    print("   Press Ctrl + C in this window anytime to stop all services.\n")
 
     try:
         while True:
             time.sleep(1)
-            # Monitor spawned processes
-            for name, p in procs:
-                if p.poll() is not None:
-                    print(f" [!] {name} stopped unexpectedly with code {p.returncode}")
+            # Check health of spawned processes
+            for name, proc in spawned_procs:
+                if proc.poll() is not None:
+                    print(f" [!] {name} terminated with code {proc.returncode}")
     except KeyboardInterrupt:
-        print("\n [x] Shutting down OneDrama Studio services...")
-        for name, p in procs:
+        print("\n [x] Shutting down OneDrama Studio services cleanly...")
+        for name, proc in spawned_procs:
             try:
                 print(f"     Stopping {name}...")
-                p.terminate()
-                p.wait(timeout=3)
+                proc.terminate()
+                proc.wait(timeout=2.0)
             except Exception:
                 try:
-                    p.kill()
+                    proc.kill()
                 except Exception:
                     pass
-        print(" [✓] All services stopped. Goodbye!")
+        print(" [✓] All local services stopped. Goodbye!\n")
 
 
 if __name__ == "__main__":
