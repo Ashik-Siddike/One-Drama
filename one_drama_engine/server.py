@@ -17,7 +17,7 @@ import time
 from typing import Any, Optional
 
 import psutil
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -370,6 +370,248 @@ def save_characters(chars: list[dict[str, Any]]):
     path = os.path.join(os.path.dirname(config["storage_paths"]["raw"]), "characters.json")
     write_json(path, chars)
     return {"status": "saved", "count": len(chars)}
+
+
+# --------------------------------------------------------------------------- #
+# Voice Profiles Library & Zero-Shot Reference Management
+# --------------------------------------------------------------------------- #
+class SetDefaultVoiceRequest(BaseModel):
+    voice_id: str
+
+
+class UpdateVoiceTranscriptRequest(BaseModel):
+    voice_id: str
+    ref_text: str
+    name: Optional[str] = None
+
+
+def _get_audio_duration(file_path: str) -> float:
+    try:
+        import subprocess
+        proc = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", file_path],
+            capture_output=True, text=True, timeout=5
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            return round(float(proc.stdout.strip()), 2)
+    except Exception:
+        pass
+    return 5.0
+
+
+def _apply_default_voice_to_settings(filename: str, ref_text: str):
+    config = load_config(DEFAULT_CONFIG_PATH)
+    if "f5_tts" not in config:
+        config["f5_tts"] = {}
+    config["f5_tts"]["ref_audio_path"] = f"storage/voice_reference/{filename}"
+    config["f5_tts"]["ref_text"] = ref_text
+    write_json(DEFAULT_CONFIG_PATH, config)
+    log.info("Synced active voice reference to settings.json: %s", filename)
+
+
+def _load_voices_registry() -> dict[str, Any]:
+    voice_dir = os.path.join(BASE_DIR, "storage", "voice_reference")
+    os.makedirs(voice_dir, exist_ok=True)
+    registry_path = os.path.join(voice_dir, "voices.json")
+    config = load_config(DEFAULT_CONFIG_PATH)
+    default_ref_path = config.get("f5_tts", {}).get("ref_audio_path", "storage/voice_reference/narrator_ref.wav")
+    default_ref_text = config.get("f5_tts", {}).get("ref_text", "इस दुनिया में कमजोर की कोई जगह नहीं है, ताकत ही सब कुछ तय करती है।")
+
+    data = read_json(registry_path, default={}) if os.path.isfile(registry_path) else {}
+
+    if not data or "voices" not in data or not data["voices"]:
+        default_fn = os.path.basename(default_ref_path)
+        full_audio_path = os.path.join(voice_dir, default_fn)
+        dur = _get_audio_duration(full_audio_path) if os.path.isfile(full_audio_path) else 5.2
+
+        default_voice = {
+            "id": "narrator_ref_default",
+            "name": "Default Male Narrator (Xianxia Intensity)",
+            "filename": default_fn,
+            "ref_text": default_ref_text,
+            "duration_sec": dur,
+            "is_default": True,
+            "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        data = {
+            "active_voice_id": "narrator_ref_default",
+            "voices": [default_voice]
+        }
+        write_json(registry_path, data)
+
+    for v in data["voices"]:
+        v["audio_url"] = f"/api/voice/audio/{v['filename']}"
+        v["is_default"] = (v["id"] == data.get("active_voice_id"))
+
+    return data
+
+
+@app.get("/api/voice/profiles")
+def get_voice_profiles():
+    registry = _load_voices_registry()
+    return {
+        "count": len(registry["voices"]),
+        "active_voice_id": registry.get("active_voice_id"),
+        "voices": registry["voices"]
+    }
+
+
+@app.post("/api/voice/upload")
+async def upload_voice_sample(
+    file: UploadFile = File(...),
+    name: str = Form(...),
+    ref_text: str = Form(...),
+    set_as_default: bool = Form(False)
+):
+    import re, subprocess
+    voice_dir = os.path.join(BASE_DIR, "storage", "voice_reference")
+    os.makedirs(voice_dir, exist_ok=True)
+
+    clean_name = name.strip() or "Custom Voice"
+    safe_slug = re.sub(r'[^a-zA-Z0-9_]', '_', clean_name.lower())[:24]
+    voice_id = f"voice_{safe_slug}_{int(time.time())}"
+    final_wav_filename = f"{voice_id}.wav"
+    final_wav_path = os.path.join(voice_dir, final_wav_filename)
+
+    temp_upload_path = os.path.join(voice_dir, f"temp_{voice_id}_{file.filename}")
+    with open(temp_upload_path, "wb") as f:
+        content = await file.read()
+        f.write(content)
+
+    try:
+        cmd = [
+            "ffmpeg", "-y", "-i", temp_upload_path,
+            "-ar", "24000", "-ac", "1", "-c:a", "pcm_s16le",
+            final_wav_path
+        ]
+        proc = subprocess.run(cmd, capture_output=True, timeout=15)
+        if proc.returncode != 0:
+            raise RuntimeError(f"FFmpeg conversion error: {proc.stderr.decode('utf-8', errors='ignore')[:200]}")
+        dur = _get_audio_duration(final_wav_path)
+    except Exception as exc:
+        if os.path.exists(temp_upload_path):
+            try: os.remove(temp_upload_path)
+            except OSError: pass
+        raise HTTPException(status_code=400, detail=f"Failed to process audio: {exc}")
+    finally:
+        if os.path.exists(temp_upload_path):
+            try: os.remove(temp_upload_path)
+            except OSError: pass
+
+    registry = _load_voices_registry()
+    new_profile = {
+        "id": voice_id,
+        "name": clean_name,
+        "filename": final_wav_filename,
+        "ref_text": ref_text.strip(),
+        "duration_sec": dur,
+        "is_default": False,
+        "audio_url": f"/api/voice/audio/{final_wav_filename}",
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+    if set_as_default:
+        for v in registry["voices"]:
+            v["is_default"] = False
+        new_profile["is_default"] = True
+        registry["active_voice_id"] = voice_id
+        _apply_default_voice_to_settings(final_wav_filename, ref_text.strip())
+
+    registry["voices"].insert(0, new_profile)
+    write_json(os.path.join(voice_dir, "voices.json"), registry)
+
+    return {
+        "status": "success",
+        "voice": new_profile,
+        "is_default": new_profile["is_default"]
+    }
+
+
+@app.post("/api/voice/select_default")
+def select_default_voice(req: SetDefaultVoiceRequest):
+    voice_dir = os.path.join(BASE_DIR, "storage", "voice_reference")
+    registry = _load_voices_registry()
+    target_voice = None
+    for v in registry["voices"]:
+        if v["id"] == req.voice_id:
+            v["is_default"] = True
+            target_voice = v
+        else:
+            v["is_default"] = False
+
+    if not target_voice:
+        raise HTTPException(status_code=404, detail="Voice profile not found.")
+
+    registry["active_voice_id"] = req.voice_id
+    write_json(os.path.join(voice_dir, "voices.json"), registry)
+    _apply_default_voice_to_settings(target_voice["filename"], target_voice["ref_text"])
+
+    return {"status": "success", "active_voice": target_voice}
+
+
+@app.post("/api/voice/update_transcript")
+def update_voice_transcript(req: UpdateVoiceTranscriptRequest):
+    voice_dir = os.path.join(BASE_DIR, "storage", "voice_reference")
+    registry = _load_voices_registry()
+    target_voice = None
+    for v in registry["voices"]:
+        if v["id"] == req.voice_id:
+            v["ref_text"] = req.ref_text.strip()
+            if req.name:
+                v["name"] = req.name.strip()
+            target_voice = v
+
+    if not target_voice:
+        raise HTTPException(status_code=404, detail="Voice profile not found.")
+
+    write_json(os.path.join(voice_dir, "voices.json"), registry)
+    if target_voice.get("is_default"):
+        _apply_default_voice_to_settings(target_voice["filename"], target_voice["ref_text"])
+
+    return {"status": "success", "voice": target_voice}
+
+
+@app.delete("/api/voice/profiles/{voice_id}")
+def delete_voice_profile(voice_id: str):
+    voice_dir = os.path.join(BASE_DIR, "storage", "voice_reference")
+    registry = _load_voices_registry()
+
+    if len(registry["voices"]) <= 1:
+        raise HTTPException(status_code=400, detail="Cannot delete the only remaining voice profile.")
+
+    target = None
+    for v in registry["voices"]:
+        if v["id"] == voice_id:
+            target = v
+            break
+
+    if not target:
+        raise HTTPException(status_code=404, detail="Voice profile not found.")
+
+    if target.get("is_default") or registry.get("active_voice_id") == voice_id:
+        raise HTTPException(status_code=400, detail="Cannot delete active default voice. Please set another voice as default first.")
+
+    if target["filename"] != "narrator_ref.wav":
+        fp = os.path.join(voice_dir, target["filename"])
+        if os.path.isfile(fp):
+            try:
+                os.remove(fp)
+            except OSError:
+                pass
+
+    registry["voices"] = [v for v in registry["voices"] if v["id"] != voice_id]
+    write_json(os.path.join(voice_dir, "voices.json"), registry)
+    return {"status": "success", "deleted_id": voice_id}
+
+
+@app.get("/api/voice/audio/{filename}")
+def stream_voice_audio(filename: str):
+    voice_dir = os.path.join(BASE_DIR, "storage", "voice_reference")
+    clean_name = os.path.basename(filename)
+    audio_path = os.path.join(voice_dir, clean_name)
+    if not os.path.isfile(audio_path):
+        raise HTTPException(status_code=404, detail="Audio file not found.")
+    return FileResponse(audio_path, media_type="audio/wav")
 
 
 # --------------------------------------------------------------------------- #

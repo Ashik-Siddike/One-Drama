@@ -160,8 +160,91 @@ export async function saveCharacters(chars: any[]) {
 }
 
 // --------------------------------------------------------------------------- //
-// Voice Studio API
+// Voice Studio API & Zero-Shot Reference Management
 // --------------------------------------------------------------------------- //
+export interface VoiceProfile {
+  id: string
+  name: string
+  filename: string
+  ref_text: string
+  duration_sec: number
+  is_default: boolean
+  audio_url: string
+  created_at: string
+}
+
+export async function fetchVoiceProfiles(): Promise<{
+  count: number
+  active_voice_id: string
+  voices: VoiceProfile[]
+}> {
+  const res = await fetch(`${API_BASE}/voice/profiles`)
+  if (!res.ok) throw new Error('Failed to fetch voice profiles')
+  return res.json()
+}
+
+export async function uploadVoiceSample(formData: FormData): Promise<{
+  status: string
+  voice: VoiceProfile
+  is_default: boolean
+}> {
+  const res = await fetch(`${API_BASE}/voice/upload`, {
+    method: 'POST',
+    body: formData,
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Failed to upload voice sample' }))
+    throw new Error(err.detail || 'Failed to upload voice sample')
+  }
+  return res.json()
+}
+
+export async function setDefaultVoice(voiceId: string): Promise<{
+  status: string
+  active_voice: VoiceProfile
+}> {
+  const res = await fetch(`${API_BASE}/voice/select_default`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ voice_id: voiceId }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Failed to set default voice' }))
+    throw new Error(err.detail || 'Failed to set default voice')
+  }
+  return res.json()
+}
+
+export async function updateVoiceTranscript(voiceId: string, refText: string, name?: string): Promise<{
+  status: string
+  voice: VoiceProfile
+}> {
+  const res = await fetch(`${API_BASE}/voice/update_transcript`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ voice_id: voiceId, ref_text: refText, name }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Failed to update transcript' }))
+    throw new Error(err.detail || 'Failed to update transcript')
+  }
+  return res.json()
+}
+
+export async function deleteVoiceProfile(voiceId: string): Promise<{
+  status: string
+  deleted_id: string
+}> {
+  const res = await fetch(`${API_BASE}/voice/profiles/${encodeURIComponent(voiceId)}`, {
+    method: 'DELETE',
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Failed to delete voice profile' }))
+    throw new Error(err.detail || 'Failed to delete voice profile')
+  }
+  return res.json()
+}
+
 export async function synthesizeVoicePreview(req: {
   text: string
   engine?: string

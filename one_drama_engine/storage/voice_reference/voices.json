@@ -1,0 +1,14 @@
+{
+  "active_voice_id": "narrator_ref_default",
+  "voices": [
+    {
+      "id": "narrator_ref_default",
+      "name": "Default Male Narrator (Xianxia Intensity)",
+      "filename": "narrator_ref.wav",
+      "ref_text": "इस दुनिया में कमजोर की कोई जगह नहीं है, ताकत ही सब कुछ तय करती है।",
+      "duration_sec": 6.67,
+      "is_default": true,
+      "created_at": "2026-09-05 16:43:49"
+    }
+  ]
+}
