@@ -233,5 +233,17 @@ def sync_to_google_drive(
         dest_json_path = os.path.join(dest_folder, "youtube_package.json")
         shutil.copy2(json_pkg_path, dest_json_path)
 
+    # 4. Copy viral YouTube Shorts if generated
+    shorts_dir = os.path.join(os.path.dirname(movie_path), "shorts")
+    if os.path.isdir(shorts_dir):
+        dest_shorts_dir = os.path.join(dest_folder, "shorts")
+        os.makedirs(dest_shorts_dir, exist_ok=True)
+        for sfile in os.listdir(shorts_dir):
+            if sfile.endswith(".mp4"):
+                src_short = os.path.join(shorts_dir, sfile)
+                dst_short = os.path.join(dest_shorts_dir, sfile)
+                shutil.copy2(src_short, dst_short)
+                log.info("  -> Copied viral YouTube Short to Google Drive: '%s'", sfile)
+
     log.info("Google Drive export complete! Files will auto-sync to cloud via Google Drive Desktop.")
     return dest_folder

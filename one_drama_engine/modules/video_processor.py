@@ -359,6 +359,7 @@ def render_dubbed_episode(
     subtitle_path: str | None = None,
     work_dir: str | None = None,
     keep_work_dir: bool = False,
+    filler_trim_plan: dict[str, Any] | None = None,
 ) -> str:
     """Render one finished, localized episode.
 
@@ -372,6 +373,7 @@ def render_dubbed_episode(
         subtitle_path: Optional SRT burned in as hard subs.
         work_dir: Scratch directory; a temp dir is used when omitted.
         keep_work_dir: Keep intermediates for debugging.
+        filler_trim_plan: Optional plan from filler_trimmer.plan_smart_trimming.
 
     Returns:
         The absolute path of the rendered MP4.
@@ -405,10 +407,33 @@ def render_dubbed_episode(
         if video_duration <= 0:
             raise PipelineError(f"Could not read a duration from {video_path}")
 
-        log.info("[%s] building narration bed (%.1fs timeline)...", stem, video_duration)
+        active_duration = video_duration
+        active_no_vocals = no_vocals_path
+        select_prefix = ""
+
+        if filler_trim_plan and filler_trim_plan.get("saved_seconds", 0.0) > 0.5:
+            from modules.filler_trimmer import trim_audio_stem, build_ffmpeg_select_filter
+            keep_segs = filler_trim_plan.get("keep_segments", [])
+            trimmed_dur = filler_trim_plan.get("trimmed_duration", video_duration)
+            if keep_segs and trimmed_dur > 0:
+                log.info(
+                    "[%s] Applying Smart Filler Trimming: %.1fs -> %.1fs (saved %.1fs / %s)",
+                    stem, video_duration, trimmed_dur,
+                    filler_trim_plan.get("saved_seconds", 0.0),
+                    filler_trim_plan.get("saved_percent", "0%"),
+                )
+                trimmed_wav = os.path.join(work_dir, "no_vocals_trimmed.wav")
+                trim_audio_stem(no_vocals_path, keep_segs, trimmed_wav)
+                active_no_vocals = trimmed_wav
+                active_duration = trimmed_dur
+                select_filter = build_ffmpeg_select_filter(keep_segs)
+                if select_filter:
+                    select_prefix = select_filter + ","
+
+        log.info("[%s] building narration bed (%.1fs timeline)...", stem, active_duration)
         voice_bed = build_voice_bed(
             synced_tracks,
-            video_duration,
+            active_duration,
             work_dir,
             voice_volume=voice_volume,
         )
@@ -417,16 +442,19 @@ def render_dubbed_episode(
             "[%s] mixing instrumental at %.0f%% under narration...", stem, bgm_volume * 100
         )
         mixed_audio = _mix_final_audio(
-            no_vocals_path,
+            active_no_vocals,
             voice_bed,
             os.path.join(work_dir, "final_mix.wav"),
-            video_duration,
+            active_duration,
             bgm_volume=bgm_volume,
             loudnorm=loudnorm,
         )
 
         vw, vh = probe_video_dimensions(video_path)
         video_filter = build_video_filter(config, width=vw, height=vh)
+        if select_prefix:
+            video_filter = select_prefix + video_filter
+
         if subtitle_path and os.path.isfile(subtitle_path):
             escaped = subtitle_path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
             video_filter += (

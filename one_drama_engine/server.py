@@ -572,6 +572,123 @@ def audit_watermark(req: ScreenWatermarkRequest):
 
 
 # --------------------------------------------------------------------------- #
+# Safe Creators & Production History (Autonomous Brain)
+# --------------------------------------------------------------------------- #
+class AuditCreatorRequest(BaseModel):
+    url_or_mid: str
+    max_videos: int = 5
+
+
+@app.get("/api/scout/safe_creators")
+def get_safe_creators():
+    try:
+        from modules.channel_scout import SafeCreatorsRegistry
+        reg = SafeCreatorsRegistry()
+        verified = reg.list_verified_creators()
+        all_creators = list(reg.data.get("creators", {}).values())
+        return {
+            "count": len(verified),
+            "creators": verified,
+            "all_creators": all_creators,
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/scout/audit_creator")
+def audit_creator(req: AuditCreatorRequest):
+    try:
+        from modules import channel_scout
+        scorecard = channel_scout.audit_creator_channel(req.url_or_mid, max_videos_to_audit=req.max_videos)
+        return scorecard
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/scout/history")
+def get_production_history():
+    try:
+        from modules.channel_scout import ProductionHistory
+        hist = ProductionHistory()
+        series_list = list(hist.data.get("processed_series", {}).values())
+        series_list.sort(key=lambda x: x.get("recorded_at", ""), reverse=True)
+        return {
+            "count": len(series_list),
+            "history": series_list,
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/scout/next_clean")
+def get_next_clean():
+    try:
+        from modules import channel_scout
+        candidate = channel_scout.get_next_clean_candidate()
+        return {"candidate": candidate}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+class GenerateShortRequest(BaseModel):
+    video_path: Optional[str] = None
+    start_sec: Optional[float] = None
+    duration_sec: float = 55.0
+    top_hook: Optional[str] = None
+    bottom_cta: str = "WATCH FULL MOVIE IN PINNED COMMENT"
+
+
+@app.post("/api/pipeline/shorts/generate")
+def generate_short(req: GenerateShortRequest):
+    config = load_config(DEFAULT_CONFIG_PATH)
+    master_dir = config["storage_paths"]["master"]
+    video_path = req.video_path or os.path.join(master_dir, config.get("master_export", {}).get("filename", "full_manhua_movie.mp4"))
+
+    if not os.path.isfile(video_path):
+        raise HTTPException(status_code=404, detail=f"Source video not found at {video_path}")
+
+    try:
+        from modules import shorts_generator
+        shorts_dir = os.path.join(master_dir, "shorts")
+        os.makedirs(shorts_dir, exist_ok=True)
+        timestamp_str = time.strftime("%Y%m%d_%H%M%S")
+        out_short = os.path.join(shorts_dir, f"viral_short_{timestamp_str}.mp4")
+
+        start_s = req.start_sec
+        hook_txt = req.top_hook
+
+        if start_s is None or not hook_txt:
+            stem = "ep_001"
+            tts_dir = config["storage_paths"]["tts"]
+            recap_file = os.path.join(tts_dir, stem, "recap_script.json")
+            auto_s, auto_e, auto_hook = shorts_generator.find_highest_tension_window(recap_file)
+            if start_s is None:
+                start_s = auto_s
+            if not hook_txt:
+                hook_txt = auto_hook
+
+        rendered = shorts_generator.render_vertical_short(
+            input_video_path=video_path,
+            output_short_path=out_short,
+            start_sec=start_s or 0.0,
+            duration_sec=req.duration_sec,
+            top_hook_text=hook_txt or "SHOCKING REVELATION!",
+            bottom_cta_text=req.bottom_cta,
+        )
+        if not rendered:
+            raise HTTPException(status_code=500, detail="Failed to render vertical short.")
+
+        return {
+            "status": "success",
+            "short_path": rendered,
+            "filename": os.path.basename(rendered),
+            "size_mb": round(os.path.getsize(rendered) / (1024 * 1024), 2),
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# --------------------------------------------------------------------------- #
 # Pipeline Execution & Background Tasks
 # --------------------------------------------------------------------------- #
 class DownloadRequest(BaseModel):
@@ -585,6 +702,8 @@ class PipelineRunRequest(BaseModel):
     force: bool = False
     carry_context: bool = True
     split_compilations: bool = False
+    enable_filler_trim: bool = False
+    generate_shorts: bool = True
 
 
 @app.get("/api/pipeline/status")
@@ -651,6 +770,10 @@ def _run_pipeline_task(req: PipelineRunRequest):
         cmd += ["--carry-context"]
     if req.split_compilations:
         cmd += ["--split-compilations"]
+    if req.enable_filler_trim:
+        cmd += ["--enable-filler-trim"]
+    if req.generate_shorts:
+        cmd += ["--generate-shorts"]
 
     try:
         proc = subprocess.Popen(
@@ -674,10 +797,14 @@ def _run_pipeline_task(req: PipelineRunRequest):
                     _PIPELINE_STATE["current_stage"] = "Recap Story Adaptation (Gemini)"
                 elif "tts" in clean.lower():
                     _PIPELINE_STATE["current_stage"] = "Voice Cloning & Warping (F5-TTS)"
+                elif "filler trim" in clean.lower():
+                    _PIPELINE_STATE["current_stage"] = "Smart Filler Trimming (0.4s Cushioned)"
                 elif "render" in clean.lower():
                     _PIPELINE_STATE["current_stage"] = "Video Remaster & Mix (FFmpeg)"
                 elif "merging" in clean.lower() or "concatenat" in clean.lower():
                     _PIPELINE_STATE["current_stage"] = "Master Concatenation (-c copy)"
+                elif "short" in clean.lower():
+                    _PIPELINE_STATE["current_stage"] = "Viral Shorts Generation (9:16 Vertical)"
         proc.wait()
         if proc.returncode == 0:
             _add_log("Pipeline completed successfully! Master movie created.")

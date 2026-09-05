@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { Film, CheckCircle2, Video, Sparkles, Play, Cloud, Check, Loader2 } from 'lucide-react'
+import { Film, CheckCircle2, Video, Sparkles, Play, Cloud, Check, Loader2, Clapperboard, Scissors } from 'lucide-react'
 import type { ProjectData } from '../../types'
-import { syncToGoogleDrive } from '../../services/api'
+import { syncToGoogleDrive, generateShort } from '../../services/api'
 
 interface MasterMoviesTableProps {
   projectData: ProjectData | null
@@ -16,6 +16,9 @@ export const MasterMoviesTable: React.FC<MasterMoviesTableProps> = ({ projectDat
   const [syncResult, setSyncResult] = useState<string | null>(null)
   const [syncError, setSyncError] = useState<string | null>(null)
 
+  const [isGeneratingShort, setIsGeneratingShort] = useState(false)
+  const [shortResult, setShortResult] = useState<any | null>(null)
+
   const handleSync = async () => {
     setIsSyncing(true)
     setSyncResult(null)
@@ -27,6 +30,19 @@ export const MasterMoviesTable: React.FC<MasterMoviesTableProps> = ({ projectDat
       setSyncError(err.message || 'Sync failed')
     } finally {
       setIsSyncing(false)
+    }
+  }
+
+  const handleGenerateShort = async (moviePath: string) => {
+    setIsGeneratingShort(true)
+    setShortResult(null)
+    try {
+      const res = await generateShort({ video_path: moviePath })
+      setShortResult(res)
+    } catch (err: any) {
+      setSyncError(err.message || 'Short generation failed')
+    } finally {
+      setIsGeneratingShort(false)
     }
   }
 
@@ -78,6 +94,19 @@ export const MasterMoviesTable: React.FC<MasterMoviesTableProps> = ({ projectDat
                 )}
 
                 <button
+                  onClick={() => handleGenerateShort(movie.path)}
+                  disabled={isGeneratingShort}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-zinc-800 text-white text-xs font-semibold font-mono tracking-wide transition-all shadow-md shadow-amber-600/20"
+                >
+                  {isGeneratingShort ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Scissors className="w-3.5 h-3.5 text-amber-200" />
+                  )}
+                  <span>{isGeneratingShort ? 'Carving Short...' : 'Carve 9:16 Short'}</span>
+                </button>
+
+                <button
                   onClick={handleSync}
                   disabled={isSyncing}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-800 text-white text-xs font-semibold font-mono tracking-wide transition-all shadow-md shadow-indigo-600/20"
@@ -94,6 +123,19 @@ export const MasterMoviesTable: React.FC<MasterMoviesTableProps> = ({ projectDat
               </div>
             </div>
           ))}
+
+          {/* Short Generation Feedback */}
+          {shortResult && (
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs font-mono text-amber-300 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-amber-400" />
+                <span>
+                  Viral 9:16 Short Ready: <strong>{shortResult.filename}</strong> ({shortResult.size_mb} MB)
+                </span>
+              </div>
+              <span className="text-[11px] text-zinc-400">Ready in storage/master_export/shorts/</span>
+            </div>
+          )}
 
           {/* Sync Result Feedback */}
           {syncResult && (

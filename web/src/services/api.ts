@@ -103,6 +103,8 @@ export async function triggerPipelineRun(opts: {
   force?: boolean
   carry_context?: boolean
   split_compilations?: boolean
+  enable_filler_trim?: boolean
+  generate_shorts?: boolean
 }) {
   const res = await fetch(`${API_BASE}/pipeline/run`, {
     method: 'POST',
@@ -216,6 +218,76 @@ export async function syncToGoogleDrive() {
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: 'Google Drive sync failed' }))
     throw new Error(err.detail || 'Google Drive sync failed')
+  }
+  return res.json()
+}
+
+// --------------------------------------------------------------------------- //
+// Safe Creators & Production History (Autonomous Brain)
+// --------------------------------------------------------------------------- //
+export async function fetchSafeCreators(): Promise<{
+  count: number
+  creators: any[]
+  all_creators: any[]
+}> {
+  const res = await fetch(`${API_BASE}/scout/safe_creators`)
+  if (!res.ok) throw new Error('Failed to fetch safe creators')
+  return res.json()
+}
+
+export async function auditCreatorChannel(urlOrMid: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/scout/audit_creator`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url_or_mid: urlOrMid, max_videos: 5 }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Audit failed' }))
+    throw new Error(err.detail || 'Audit failed')
+  }
+  return res.json()
+}
+
+export async function fetchProductionHistory(): Promise<{
+  count: number
+  history: any[]
+}> {
+  const res = await fetch(`${API_BASE}/scout/history`)
+  if (!res.ok) throw new Error('Failed to fetch production history')
+  return res.json()
+}
+
+export async function fetchNextCleanSeries(): Promise<{
+  candidate: any
+}> {
+  const res = await fetch(`${API_BASE}/scout/next_clean`)
+  if (!res.ok) throw new Error('Failed to query next clean series')
+  return res.json()
+}
+
+// --------------------------------------------------------------------------- //
+// High-CTR YouTube Shorts API
+// --------------------------------------------------------------------------- //
+export async function generateShort(opts?: {
+  video_path?: string
+  start_sec?: number
+  duration_sec?: number
+  top_hook?: string
+  bottom_cta?: string
+}): Promise<{
+  status: string
+  short_path: string
+  filename: string
+  size_mb: number
+}> {
+  const res = await fetch(`${API_BASE}/pipeline/shorts/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(opts || {}),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Shorts generation failed' }))
+    throw new Error(err.detail || 'Shorts generation failed')
   }
   return res.json()
 }

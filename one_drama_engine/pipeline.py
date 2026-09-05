@@ -363,19 +363,51 @@ def stage_render(
             log.info("  [5/5] render    : cached")
             return workspace.output_path
 
+    filler_trim_plan = None
+    active_tracks = tracks
+    active_segments = dub_segments
+
+    if getattr(args, "enable_filler_trim", False):
+        try:
+            from modules import filler_trimmer
+            dur = ffprobe_duration(workspace.video_path)
+            filler_trim_plan = filler_trimmer.plan_smart_trimming(
+                dur,
+                dub_segments,
+                workspace.no_vocals_path,
+            )
+            if filler_trim_plan and filler_trim_plan.get("saved_seconds", 0.0) > 0.5:
+                log.info(
+                    "  [5/5] filler trim: reducing %.1fs to %.1fs (saving %.1fs / %s)",
+                    filler_trim_plan["original_duration"],
+                    filler_trim_plan["trimmed_duration"],
+                    filler_trim_plan["saved_seconds"],
+                    filler_trim_plan["saved_percent"],
+                )
+                time_remap = filler_trim_plan["time_remap"]
+                active_segments = filler_trimmer.remap_speech_cues(dub_segments, time_remap)
+                active_tracks = []
+                for tr in tracks:
+                    new_tr = dict(tr)
+                    new_tr["start"] = filler_trimmer.remap_timestamp(time_remap, float(tr.get("start", 0.0)))
+                    active_tracks.append(new_tr)
+        except Exception as exc:
+            log.warning("Could not compute filler trimming: %s", exc)
+
     subtitle_path = None
     if args.burn_subtitles:
-        transcriber.segments_to_srt(dub_segments, workspace.subtitle_path, text_key="recap_text")
+        transcriber.segments_to_srt(active_segments, workspace.subtitle_path, text_key="recap_text")
         subtitle_path = workspace.subtitle_path
 
     log.info("  [5/5] render    : filtering video + mixing audio...")
     output = video_processor.render_dubbed_episode(
         workspace.video_path,
         workspace.no_vocals_path,
-        tracks,
+        active_tracks,
         workspace.output_path,
         config,
         subtitle_path=subtitle_path,
+        filler_trim_plan=filler_trim_plan,
     )
     workspace.mark("render", output=output)
     return output
@@ -623,6 +655,53 @@ def run_pipeline(config: dict, args) -> int:
         log.warning("Could not generate YouTube SEO package: %s", exc)
 
     # --------------------------------------------------------------------------- #
+    # Stage 7.5: Automated High-CTR Vertical YouTube Shorts
+    # --------------------------------------------------------------------------- #
+    should_gen_shorts = getattr(args, "generate_shorts", False) or config.get("generate_shorts", True)
+    if should_gen_shorts and os.path.isfile(master_path):
+        try:
+            from modules import shorts_generator
+            log.info("")
+            log.info("Generating High-CTR Vertical YouTube Shorts Teaser...")
+            shorts_dir = os.path.join(master_dir, "shorts")
+            ensure_dir(shorts_dir)
+            short_path = os.path.join(shorts_dir, "viral_short_01.mp4")
+
+            recap_path = ""
+            if results and results[0].get("stem"):
+                recap_path = os.path.join(config["storage_paths"]["tts"], results[0]["stem"], "recap_script.json")
+
+            start_s, end_s, hook_clean = shorts_generator.find_highest_tension_window(recap_path)
+            rendered_short = shorts_generator.render_vertical_short(
+                input_video_path=master_path,
+                output_short_path=short_path,
+                start_sec=start_s,
+                duration_sec=min(55.0, end_s - start_s),
+                top_hook_text=hook_clean.upper() if hook_clean else "TOP DRAMA MOMENT!",
+                bottom_cta_text="WATCH FULL MOVIE IN PINNED COMMENT",
+            )
+            if rendered_short:
+                log.info("Viral YouTube Short Ready: %s", rendered_short)
+        except Exception as exc:
+            log.warning("Could not generate viral YouTube Short: %s", exc)
+
+    # --------------------------------------------------------------------------- #
+    # Deduplication & Ledger: Record in ProductionHistory
+    # --------------------------------------------------------------------------- #
+    try:
+        from modules.channel_scout import ProductionHistory
+        hist = ProductionHistory()
+        for res in succeeded:
+            hist.record_series(
+                res["stem"],
+                title=res["episode"],
+                status="completed",
+                metadata={"stem": res.get("stem"), "clips": res.get("clips")},
+            )
+    except Exception as exc:
+        log.debug("Failed to record in ProductionHistory: %s", exc)
+
+    # --------------------------------------------------------------------------- #
     # Stage 8: Google Drive Auto-Sync
     # --------------------------------------------------------------------------- #
     gdrive_cfg = config.get("google_drive_sync", {})
@@ -696,6 +775,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Feed each episode's recap summary into the next for name consistency",
     )
     behaviour.add_argument("--story-context", default="", help="Series synopsis / name sheet")
+    behaviour.add_argument(
+        "--enable-filler-trim",
+        action="store_true",
+        help="Smart filler trimming: eliminates dead air and non-dialogue stalls with 0.4s safety cushion",
+    )
+    behaviour.add_argument(
+        "--generate-shorts",
+        action="store_true",
+        help="Carve vertical 9:16 high-CTR teaser Short from master compilation with hook badges",
+    )
     behaviour.add_argument("--verbose", "-v", action="store_true", help="Debug logging")
 
     performance = parser.add_argument_group("performance")
@@ -747,6 +836,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--screen-watermarks",
         action="store_true",
         help="Pre-screen candidates for corner watermarks using remote snippet sniffing",
+    )
+    utilities.add_argument(
+        "--scout-safe-creators",
+        metavar="URL_OR_MID",
+        help="Audit up to 5 uploads from a creator space and register in Safe Creators Brain",
+    )
+    utilities.add_argument(
+        "--list-safe-creators",
+        action="store_true",
+        help="List all verified safe creators registered in the brain and exit",
+    )
+    utilities.add_argument(
+        "--next-clean-series",
+        action="store_true",
+        help="Query Safe Creators Brain & 3D Radar for next unworked, 100%% clean series",
     )
     return parser
 
@@ -890,8 +994,80 @@ def main(argv: list[str] | None = None) -> int:
             )
         return 0
 
+    if args.scout_safe_creators:
+        from modules import channel_scout
+
+        log.info("Auditing creator channel: %s", args.scout_safe_creators)
+        scorecard = channel_scout.audit_creator_channel(args.scout_safe_creators)
+        print("\n" + "=" * 74)
+        print("  CREATOR AUDIT SCORECARD")
+        print("=" * 74)
+        print(f"Creator ID  : {scorecard.get('creator_id')}")
+        print(f"Creator Name: {scorecard.get('name')}")
+        print(f"Space URL   : {scorecard.get('space_url')}")
+        print(
+            f"Clean Ratio : {scorecard.get('clean_ratio', 0.0) * 100:.1f}% ({scorecard.get('clean_count')}/{scorecard.get('total_audited')})"
+        )
+        print(
+            f"Safe Status : {'VERIFIED SAFE' if scorecard.get('is_verified_safe') else 'NOT VERIFIED'}"
+        )
+        print("=" * 74)
+        return 0
+
+    if args.list_safe_creators:
+        from modules.channel_scout import SafeCreatorsRegistry
+
+        reg = SafeCreatorsRegistry()
+        creators = reg.list_verified_creators()
+        print("\n" + "=" * 82)
+        print(f"{'MID':<12} {'NAME':<24} {'CLEAN RATIO':<14} {'AUDITED':<10} {'STATUS'}")
+        print("=" * 82)
+        for c in creators:
+            print(
+                f"{c['creator_id']:<12} {c['name'][:22]:<24} {c['clean_ratio']*100:.1f}%{'':<8} {c['total_audited']:<10} {'VERIFIED SAFE'}"
+            )
+        print("=" * 82)
+        return 0
+
+    if args.next_clean_series:
+        from modules import channel_scout
+
+        log.info("Querying Autonomous Safe Creators Brain & 3D Radar for next clean series...")
+        candidate = channel_scout.get_next_clean_candidate()
+        if not candidate:
+            log.warning("No clean, unworked candidates found at this time.")
+            return 1
+        print("\n" + "=" * 82)
+        print("  🎯 APPROVED CLEAN CANDIDATE FOUND")
+        print("=" * 82)
+        print(f"Source Track : {candidate.get('source_track')}")
+        print(f"Title        : {candidate.get('title')}")
+        print(
+            f"Creator      : {candidate.get('creator_name')} (MID: {candidate.get('creator_id', 'N/A')})"
+        )
+        print(f"URL          : {candidate.get('url')}")
+        print(f"Episodes     : {candidate.get('episodes')}")
+        print("=" * 82)
+        log.info(
+            "\nTo download and process this series, run:\n  python pipeline.py --download-series \"%s\"",
+            candidate["url"],
+        )
+        return 0
+
     if args.download_series:
         from modules import downloader
+        from modules.channel_scout import ProductionHistory
+
+        hist = ProductionHistory()
+        if hist.is_known(args.download_series):
+            status = hist.get_status(args.download_series)
+            log.warning(
+                "Series '%s' is already in ProductionHistory with status '%s'!",
+                args.download_series,
+                status,
+            )
+            log.warning("Skipping download to avoid duplicate processing.")
+            return 0
 
         custom_blocks = config.get("discovery", {}).get("blocked_franchises", [])
         raw_dir = config["storage_paths"]["raw"]
@@ -903,6 +1079,12 @@ def main(argv: list[str] | None = None) -> int:
                 cookies_from_browser=args.cookies,
                 custom_blocklist=custom_blocks,
             )
+            if paths:
+                hist.record_series(
+                    args.download_series,
+                    title=os.path.basename(paths[0]),
+                    status="downloaded",
+                )
         except PipelineError as exc:
             log.error("%s", exc)
             return 1
