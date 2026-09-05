@@ -375,3 +375,102 @@ export async function generateShort(opts?: {
   return res.json()
 }
 
+// --------------------------------------------------------------------------- //
+// Video Catalog & Scene Directing API
+// --------------------------------------------------------------------------- //
+export interface PlayableVideo {
+  id: string
+  category: 'processed' | 'raw' | 'master' | 'shorts'
+  category_label: string
+  filename: string
+  title: string
+  stem: string
+  duration: number
+  size_mb: number
+  url: string
+}
+
+export async function fetchVideoList(): Promise<{ count: number; videos: PlayableVideo[] }> {
+  const res = await fetch(`${API_BASE}/video/list`)
+  if (!res.ok) throw new Error('Failed to fetch video catalog')
+  return res.json()
+}
+
+export interface SceneCue {
+  id: string
+  index: number
+  status: 'done' | 'pending'
+  start: number
+  end: number
+  duration: number
+  chinese: string
+  hindi: string
+  camera: string
+  motion: string
+  bgm: string
+  sfx: string
+  characters: string[]
+}
+
+export async function fetchEpisodeScenes(stem: string): Promise<{ stem: string; count: number; scenes: SceneCue[] }> {
+  const res = await fetch(`${API_BASE}/scenes/episode/${encodeURIComponent(stem)}`)
+  if (!res.ok) throw new Error('Failed to fetch episode scenes')
+  return res.json()
+}
+
+export async function saveEpisodeScenes(stem: string, scenes: SceneCue[]): Promise<any> {
+  const res = await fetch(`${API_BASE}/scenes/episode/${encodeURIComponent(stem)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scenes }),
+  })
+  if (!res.ok) throw new Error('Failed to save episode scenes')
+  return res.json()
+}
+
+// --------------------------------------------------------------------------- //
+// Smart Intro & Outro Guard API
+// --------------------------------------------------------------------------- //
+export interface IntroOutroAudit {
+  stem: string
+  video_filename: string
+  total_duration: number
+  clean_start_sec: number
+  clean_end_sec: number
+  clean_duration_sec: number
+  intro_cut_duration: number
+  outro_cut_duration: number
+  cta_detected: string[]
+  intro_detected: string[]
+  has_chinese_cta: boolean
+  confidence: number
+}
+
+export async function fetchIntroOutroAudit(stem: string): Promise<IntroOutroAudit> {
+  const res = await fetch(`${API_BASE}/qc/intro_outro/${encodeURIComponent(stem)}`)
+  if (!res.ok) throw new Error('Failed to audit intro/outro boundaries')
+  return res.json()
+}
+
+export async function trimIntroOutro(
+  stem: string,
+  clean_start_sec: number,
+  clean_end_sec: number,
+  reencode = true
+): Promise<{
+  status: string
+  output_path: string
+  filename: string
+  clean_duration_sec: number
+  stream_url: string
+}> {
+  const res = await fetch(`${API_BASE}/qc/trim_intro_outro/${encodeURIComponent(stem)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clean_start_sec, clean_end_sec, reencode }),
+  })
+  if (!res.ok) throw new Error('Failed to trim intro/outro')
+  return res.json()
+}
+
+

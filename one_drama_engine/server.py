@@ -279,6 +279,255 @@ def get_episode_details(stem: str):
 
 
 # --------------------------------------------------------------------------- #
+# Video Streaming & Playback Catalog API
+# --------------------------------------------------------------------------- #
+@app.get("/api/video/list")
+def list_available_videos():
+    config = load_config(DEFAULT_CONFIG_PATH)
+    paths = config["storage_paths"]
+
+    videos = []
+
+    # 1. Processed Dubbed Episodes (Primary)
+    if os.path.isdir(paths["processed"]):
+        for f in sorted(os.listdir(paths["processed"])):
+            if f.endswith(".mp4"):
+                fp = os.path.join(paths["processed"], f)
+                stem = f.replace("_dubbed.mp4", "").replace(".mp4", "")
+                dur = _get_audio_duration(fp)
+                videos.append({
+                    "id": f"processed_{f}",
+                    "category": "processed",
+                    "category_label": "Dubbed Episode",
+                    "filename": f,
+                    "title": f"{stem.upper()} - Hindi Dubbed & Mastered",
+                    "stem": stem,
+                    "duration": dur,
+                    "size_mb": round(os.path.getsize(fp) / (1024 * 1024), 2),
+                    "url": f"/api/video/stream/processed/{f}",
+                })
+
+    # 2. Raw Source Episodes
+    if os.path.isdir(paths["raw"]):
+        for f in sorted(os.listdir(paths["raw"])):
+            if f.endswith(".mp4"):
+                fp = os.path.join(paths["raw"], f)
+                stem, _ = os.path.splitext(f)
+                dur = _get_audio_duration(fp)
+                videos.append({
+                    "id": f"raw_{f}",
+                    "category": "raw",
+                    "category_label": "Raw Source",
+                    "filename": f,
+                    "title": f"{stem.upper()} - Original Raw Video",
+                    "stem": stem,
+                    "duration": dur,
+                    "size_mb": round(os.path.getsize(fp) / (1024 * 1024), 2),
+                    "url": f"/api/video/stream/raw/{f}",
+                })
+
+    # 3. Master Export Movies
+    if os.path.isdir(paths["master"]):
+        for f in sorted(os.listdir(paths["master"])):
+            if f.endswith(".mp4"):
+                fp = os.path.join(paths["master"], f)
+                dur = _get_audio_duration(fp)
+                videos.append({
+                    "id": f"master_{f}",
+                    "category": "master",
+                    "category_label": "Master Movie",
+                    "filename": f,
+                    "title": "Master Feature Movie (1080p Full)",
+                    "stem": "master",
+                    "duration": dur,
+                    "size_mb": round(os.path.getsize(fp) / (1024 * 1024), 2),
+                    "url": f"/api/video/stream/master/{f}",
+                })
+
+    # 4. Viral Shorts
+    shorts_dir = os.path.join(paths["master"], "shorts")
+    if os.path.isdir(shorts_dir):
+        for f in sorted(os.listdir(shorts_dir)):
+            if f.endswith(".mp4"):
+                fp = os.path.join(shorts_dir, f)
+                dur = _get_audio_duration(fp)
+                videos.append({
+                    "id": f"shorts_{f}",
+                    "category": "shorts",
+                    "category_label": "Viral Short (9:16)",
+                    "filename": f,
+                    "title": f"Viral Short ({f})",
+                    "stem": "shorts",
+                    "duration": dur,
+                    "size_mb": round(os.path.getsize(fp) / (1024 * 1024), 2),
+                    "url": f"/api/video/stream/shorts/{f}",
+                })
+
+    return {"count": len(videos), "videos": videos}
+
+
+@app.get("/api/video/stream/{category}/{filename}")
+def stream_video_file(category: str, filename: str):
+    config = load_config(DEFAULT_CONFIG_PATH)
+    paths = config["storage_paths"]
+    clean_name = os.path.basename(filename)
+
+    if category == "raw":
+        folder = paths["raw"]
+    elif category == "processed":
+        folder = paths["processed"]
+    elif category == "master":
+        folder = paths["master"]
+    elif category == "shorts":
+        folder = os.path.join(paths["master"], "shorts")
+    elif category == "clean_trimmed":
+        folder = os.path.join(paths["processed"], "clean_trimmed")
+    else:
+        raise HTTPException(status_code=400, detail="Invalid video category.")
+
+    fp = os.path.join(folder, clean_name)
+    if not os.path.isfile(fp):
+        raise HTTPException(status_code=404, detail="Video file not found.")
+
+    return FileResponse(fp, media_type="video/mp4", headers={"Accept-Ranges": "bytes"})
+
+
+# --------------------------------------------------------------------------- #
+# Scene Storyboard & Directing Cues API
+# --------------------------------------------------------------------------- #
+class SaveScenesRequest(BaseModel):
+    scenes: list[dict[str, Any]]
+
+
+@app.get("/api/scenes/episode/{stem}")
+def get_episode_scenes(stem: str):
+    config = load_config(DEFAULT_CONFIG_PATH)
+    paths = config["storage_paths"]
+    tts_dir = os.path.join(paths["tts"], stem)
+    recap_file = os.path.join(tts_dir, "recap_script.json")
+    cues_file = os.path.join(tts_dir, "scenes_cues.json")
+
+    saved_cues = read_json(cues_file, default={}) if os.path.isfile(cues_file) else {}
+
+    cam_defaults = ["Close Up", "Low Angle Dynamic", "Wide Shot", "Tracking Shot"]
+    motion_defaults = ["Slow Zoom", "Parallax Pan", "Camera Shake", "Static Focus"]
+    bgm_defaults = ["Dark Tension", "Epic Climax", "High Stakes Cultivation", "Tragic Sentiment"]
+    sfx_defaults = ["Thunder Strike", "Sword Slash", "Energy Blast", "None"]
+
+    scenes = []
+    if os.path.isfile(recap_file):
+        recap_data = read_json(recap_file, default=[])
+        proc_mp4 = os.path.join(paths["processed"], f"{stem}_dubbed.mp4")
+        is_rendered = os.path.isfile(proc_mp4)
+
+        for idx, item in enumerate(recap_data):
+            sc_id = f"{idx+1:03d}"
+            cue = saved_cues.get(sc_id, {})
+            start_s = round(float(item.get("start", 0.0)), 2)
+            end_s = round(float(item.get("end", 0.0)), 2)
+            dur_s = round(float(item.get("duration", end_s - start_s)), 2)
+
+            scenes.append({
+                "id": sc_id,
+                "index": idx,
+                "status": "done" if is_rendered else "pending",
+                "start": start_s,
+                "end": end_s,
+                "duration": dur_s,
+                "chinese": item.get("original_text", ""),
+                "hindi": cue.get("hindi", item.get("recap_text", "")),
+                "camera": cue.get("camera", cam_defaults[idx % len(cam_defaults)]),
+                "motion": cue.get("motion", motion_defaults[idx % len(motion_defaults)]),
+                "bgm": cue.get("bgm", bgm_defaults[idx % len(bgm_defaults)]),
+                "sfx": cue.get("sfx", sfx_defaults[idx % len(sfx_defaults)]),
+                "characters": cue.get("characters", ["Lin Feng", "Shen Qingyan"] if idx % 2 == 0 else ["Elder Gu", "Teacher Qin"]),
+            })
+    else:
+        # Fallback default dramatic scenes
+        scenes = [
+            {
+                "id": "001",
+                "index": 0,
+                "status": "done",
+                "start": 0.0,
+                "end": 60.0,
+                "duration": 60.0,
+                "chinese": "林枫！今日你勾结外道，罪不容诛！受死吧！",
+                "hindi": "उस रात लिन फेंग को पहली बार अपनी ही सेक्ट के गद्दार एल्डर्स के असली चेहरे का एहसास हुआ...",
+                "camera": "Close Up",
+                "motion": "Slow Zoom",
+                "bgm": "Dark Tension",
+                "sfx": "Thunder Strike",
+                "characters": ["Lin Feng", "Elder Gu"],
+            },
+            {
+                "id": "002",
+                "index": 1,
+                "status": "done",
+                "start": 60.0,
+                "end": 120.0,
+                "duration": 60.0,
+                "chinese": "哈哈哈！既然你们不仁，就休怪我九霄剑煞无情！",
+                "hindi": "लेकिन उसने घुटने टेकने से इनकार कर दिया। अपनी तलवार को हवा में लहराते हुए उसने अंतिम शक्ति को जगाया!",
+                "camera": "Low Angle Dynamic",
+                "motion": "Parallax Pan",
+                "bgm": "Epic Climax",
+                "sfx": "Sword Slash",
+                "characters": ["Lin Feng"],
+            },
+            {
+                "id": "003",
+                "index": 2,
+                "status": "pending",
+                "start": 120.0,
+                "end": 180.0,
+                "duration": 60.0,
+                "chinese": "这股力量...难道是传说中的太古九霄炎？！不可能！",
+                "hindi": "एल्डर गू की आंखें खौफ से फटी की फटी रह गईं। वह नीली आग साधारण आग नहीं, बल्कि अमर लोक की दिव्य ज्वाला थी!",
+                "camera": "Wide Shot",
+                "motion": "Camera Shake",
+                "bgm": "High Stakes Cultivation",
+                "sfx": "Energy Blast",
+                "characters": ["Elder Gu"],
+            },
+        ]
+
+    return {"stem": stem, "count": len(scenes), "scenes": scenes}
+
+
+@app.post("/api/scenes/episode/{stem}")
+def save_episode_scenes(stem: str, req: SaveScenesRequest):
+    config = load_config(DEFAULT_CONFIG_PATH)
+    paths = config["storage_paths"]
+    tts_dir = os.path.join(paths["tts"], stem)
+    os.makedirs(tts_dir, exist_ok=True)
+    cues_file = os.path.join(tts_dir, "scenes_cues.json")
+    recap_file = os.path.join(tts_dir, "recap_script.json")
+
+    cues_dict = {}
+    for sc in req.scenes:
+        cues_dict[sc["id"]] = {
+            "hindi": sc.get("hindi"),
+            "camera": sc.get("camera"),
+            "motion": sc.get("motion"),
+            "bgm": sc.get("bgm"),
+            "sfx": sc.get("sfx"),
+            "characters": sc.get("characters", []),
+        }
+    write_json(cues_file, cues_dict)
+
+    if os.path.isfile(recap_file):
+        recap_data = read_json(recap_file, default=[])
+        for idx, item in enumerate(recap_data):
+            sc_id = f"{idx+1:03d}"
+            if sc_id in cues_dict and cues_dict[sc_id].get("hindi"):
+                item["recap_text"] = cues_dict[sc_id]["hindi"]
+        write_json(recap_file, recap_data)
+
+    return {"status": "success", "count": len(req.scenes), "stem": stem}
+
+
+# --------------------------------------------------------------------------- #
 # Story Bible & Characters
 # --------------------------------------------------------------------------- #
 @app.get("/api/story/bible")
@@ -702,6 +951,79 @@ def run_qc_audit():
             "bgm_ducking_35": True,
             "score": 98
         }
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Smart Intro & Outro Guard API
+# --------------------------------------------------------------------------- #
+class TrimIntroOutroRequest(BaseModel):
+    clean_start_sec: float
+    clean_end_sec: float
+    reencode: bool = True
+
+
+@app.get("/api/qc/intro_outro/{stem}")
+def audit_intro_outro(stem: str):
+    config = load_config(DEFAULT_CONFIG_PATH)
+    paths = config["storage_paths"]
+
+    video_path = os.path.join(paths["processed"], f"{stem}_dubbed.mp4")
+    if not os.path.isfile(video_path):
+        video_path = os.path.join(paths["raw"], f"{stem}.mp4")
+    if not os.path.isfile(video_path):
+        raise HTTPException(status_code=404, detail=f"Episode video not found for {stem}.")
+
+    tts_dir = os.path.join(paths["tts"], stem)
+    recap_file = os.path.join(tts_dir, "recap_script.json")
+    transcript_file = os.path.join(tts_dir, "transcript.json")
+
+    from modules import intro_outro_guard
+    res = intro_outro_guard.detect_intro_outro_boundaries(
+        video_path=video_path,
+        recap_script_path=recap_file if os.path.isfile(recap_file) else None,
+        transcript_path=transcript_file if os.path.isfile(transcript_file) else None,
+    )
+    res["stem"] = stem
+    res["video_filename"] = os.path.basename(video_path)
+    return res
+
+
+@app.post("/api/qc/trim_intro_outro/{stem}")
+def perform_intro_outro_trim(stem: str, req: TrimIntroOutroRequest):
+    config = load_config(DEFAULT_CONFIG_PATH)
+    paths = config["storage_paths"]
+
+    input_path = os.path.join(paths["processed"], f"{stem}_dubbed.mp4")
+    is_processed = True
+    if not os.path.isfile(input_path):
+        input_path = os.path.join(paths["raw"], f"{stem}.mp4")
+        is_processed = False
+    if not os.path.isfile(input_path):
+        raise HTTPException(status_code=404, detail="Video file not found.")
+
+    output_dir = os.path.join(paths["processed"], "clean_trimmed")
+    os.makedirs(output_dir, exist_ok=True)
+    out_filename = f"{stem}_clean.mp4" if is_processed else f"{stem}_raw_clean.mp4"
+    output_path = os.path.join(output_dir, out_filename)
+
+    from modules import intro_outro_guard
+    res = intro_outro_guard.trim_intro_outro(
+        input_video_path=input_path,
+        output_video_path=output_path,
+        clean_start_sec=req.clean_start_sec,
+        clean_end_sec=req.clean_end_sec,
+        reencode=req.reencode,
+    )
+    if not res:
+        raise HTTPException(status_code=500, detail="Failed to trim video intro/outro.")
+
+    return {
+        "status": "success",
+        "output_path": res,
+        "filename": out_filename,
+        "clean_duration_sec": round(req.clean_end_sec - req.clean_start_sec, 2),
+        "stream_url": f"/api/video/stream/clean_trimmed/{out_filename}",
     }
 
 

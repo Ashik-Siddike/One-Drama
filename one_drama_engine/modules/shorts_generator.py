@@ -41,10 +41,12 @@ def _get_system_font() -> str | None:
 def find_highest_tension_window(
     recap_script_path: str,
     target_duration: float = 54.0,
+    safe_intro_offset: float = 3.5,
+    safe_outro_offset: float = 5.0,
 ) -> tuple[float, float, str]:
-    """Find the start timestamp of the highest-drama 50-58s window."""
-    default_start = 0.0
-    default_end = target_duration
+    """Find the start timestamp of the highest-drama 50-58s window, strictly avoiding intro/outro bumpers."""
+    default_start = safe_intro_offset
+    default_end = default_start + target_duration
     default_hook = "SHE KISSED HIM IN FRONT OF EVERYONE?!"
 
     if not os.path.isfile(recap_script_path):
@@ -60,12 +62,23 @@ def find_highest_tension_window(
         return default_start, default_end, default_hook
 
     best_score = -1
-    best_start = 0.0
+    best_start = safe_intro_offset
     best_text = ""
+
+    # Chinese Outro CTA filter keywords to strictly avoid selecting closing cards
+    CTA_EXCLUSION = ["关注", "点赞", "三连", "下集更精彩", "未完待续", "下集再见"]
 
     for seg in segments:
         text = seg.get("recap_text", "")
+        orig_text = seg.get("original_text", "")
         start = float(seg.get("start", 0.0))
+
+        # Skip segments that touch the intro bumper zone or contain creator outro CTA
+        if start < safe_intro_offset:
+            continue
+        if any(cta in orig_text for cta in CTA_EXCLUSION):
+            continue
+
         score = sum(text.count(kw) for kw in TENSION_KEYWORDS)
 
         # Extra weight for exclamation marks and dramatic punctuation

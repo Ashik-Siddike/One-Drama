@@ -175,6 +175,28 @@
       "status": "rejected_watermarked",
       "recorded_at": "2026-09-05 16:06:18",
       "metadata": {}
+    },
+    "ep_001": {
+      "series_id": "ep_001",
+      "title": "ep_001.mp4",
+      "url": "https://www.bilibili.com/video/ep_001",
+      "status": "completed",
+      "recorded_at": "2026-09-05 16:47:13",
+      "metadata": {
+        "stem": "ep_001",
+        "clips": 3
+      }
+    },
+    "ep_002": {
+      "series_id": "ep_002",
+      "title": "ep_002.mp4",
+      "url": "https://www.bilibili.com/video/ep_002",
+      "status": "completed",
+      "recorded_at": "2026-09-05 16:47:13",
+      "metadata": {
+        "stem": "ep_002",
+        "clips": 3
+      }
     }
   }
 }
