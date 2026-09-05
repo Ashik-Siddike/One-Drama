@@ -77,8 +77,15 @@ export function App() {
     await loadAllData()
   }
 
-  const handleRunPipeline = async (limit?: number) => {
-    await triggerPipelineRun({ limit })
+  const handleRunPipeline = async (opts?: {
+    limit?: number
+    force?: boolean
+    carry_context?: boolean
+    split_compilations?: boolean
+    enable_filler_trim?: boolean
+    generate_shorts?: boolean
+  }) => {
+    await triggerPipelineRun(opts || {})
     await loadAllData()
   }
 
@@ -114,7 +121,7 @@ export function App() {
               <ActivePipelineCard status={pipelineStatus} />
               <QuickActionCenter
                 onDownload={handleDownload}
-                onRunPipeline={handleRunPipeline}
+                onRunPipeline={() => handleRunPipeline()}
                 isBusy={pipelineStatus?.is_running || false}
               />
               <MasterMoviesTable projectData={projectData} />
@@ -146,7 +153,7 @@ export function App() {
           {currentTab === 'render' && (
             <RenderCenterView
               pipelineStatus={pipelineStatus}
-              onStartRender={() => handleRunPipeline()}
+              onStartRender={handleRunPipeline}
             />
           )}
 

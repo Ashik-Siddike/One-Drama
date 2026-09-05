@@ -51,6 +51,7 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onIngestSeries }) 
   const [dailySuggestions, setDailySuggestions] = useState<any[]>([])
   const [activeThemeId, setActiveThemeId] = useState<string | null>(null)
   const [screenWatermarks, setScreenWatermarks] = useState(true)
+  const [formatFilter, setFormatFilter] = useState<'all' | 'micro' | 'standard' | 'compilation'>('all')
   const [isLoading, setIsLoading] = useState(false)
   const [ingestingUrl, setIngestingUrl] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<string | null>(null)
@@ -386,6 +387,56 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onIngestSeries }) 
                 </button>
               ))}
             </div>
+
+            {/* Content Format Filter Chips */}
+            <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-zinc-800/60">
+              <span className="text-[11px] font-mono text-zinc-400 mr-1">Content Format:</span>
+              <button
+                type="button"
+                onClick={() => setFormatFilter('all')}
+                className={`text-xs font-mono px-2.5 py-1 rounded-lg border transition-all ${
+                  formatFilter === 'all'
+                    ? 'bg-zinc-100 text-zinc-950 font-bold border-white'
+                    : 'bg-zinc-800/60 text-zinc-400 border-zinc-700/60 hover:text-zinc-200'
+                }`}
+              >
+                All Formats
+              </button>
+              <button
+                type="button"
+                onClick={() => setFormatFilter('micro')}
+                className={`text-xs font-mono px-2.5 py-1 rounded-lg border transition-all flex items-center gap-1.5 ${
+                  formatFilter === 'micro'
+                    ? 'bg-amber-500 text-zinc-950 font-bold border-amber-400 shadow-md shadow-amber-500/20'
+                    : 'bg-zinc-800/60 text-amber-300 border-zinc-700/60 hover:border-amber-500/50'
+                }`}
+              >
+                <span>⚡ Micro-Series (3–5 min Motion Comic)</span>
+                <span className="px-1.5 py-0.2 rounded bg-amber-400/20 text-[9px] font-bold">PRIORITY</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setFormatFilter('standard')}
+                className={`text-xs font-mono px-2.5 py-1 rounded-lg border transition-all ${
+                  formatFilter === 'standard'
+                    ? 'bg-blue-600 text-white font-bold border-blue-400'
+                    : 'bg-zinc-800/60 text-blue-300 border-zinc-700/60 hover:border-blue-500/50'
+                }`}
+              >
+                📦 Standard Parts (14–15 min Batch)
+              </button>
+              <button
+                type="button"
+                onClick={() => setFormatFilter('compilation')}
+                className={`text-xs font-mono px-2.5 py-1 rounded-lg border transition-all ${
+                  formatFilter === 'compilation'
+                    ? 'bg-purple-600 text-white font-bold border-purple-400'
+                    : 'bg-zinc-800/60 text-purple-300 border-zinc-700/60 hover:border-purple-500/50'
+                }`}
+              >
+                🎬 Full Compilation (25–30+ min)
+              </button>
+            </div>
           </div>
 
           {/* Results Grid */}
@@ -393,7 +444,18 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onIngestSeries }) 
             <div className="flex items-center justify-between">
               <h4 className="text-sm font-bold text-zinc-200 flex items-center gap-2">
                 <Layers className="w-4 h-4 text-zinc-400" />
-                <span>Screened Candidates ({items.length})</span>
+                <span>
+                  Screened Candidates ({
+                    items.filter((item) => {
+                      if (formatFilter === 'all') return true
+                      const dur = item.duration || 0
+                      if (formatFilter === 'micro') return dur <= 360 || dur === 0
+                      if (formatFilter === 'standard') return dur > 360 && dur <= 1200
+                      if (formatFilter === 'compilation') return dur > 1200
+                      return true
+                    }).length
+                  })
+                </span>
               </h4>
             </div>
 
@@ -408,7 +470,21 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onIngestSeries }) 
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {items.map((item, idx) => {
+                {items
+                  .filter((item) => {
+                    if (formatFilter === 'all') return true
+                    const dur = item.duration || 0
+                    if (formatFilter === 'micro') return dur <= 360 || dur === 0
+                    if (formatFilter === 'standard') return dur > 360 && dur <= 1200
+                    if (formatFilter === 'compilation') return dur > 1200
+                    return true
+                  })
+                  .map((item, idx) => {
+                    const dur = item.duration || 0
+                    const isMicro = dur <= 360 || dur === 0
+                    const isStandard = dur > 360 && dur <= 1200
+                    const formatBadge = isMicro ? '⚡ Micro-Series' : isStandard ? '📦 Standard' : '🎬 Compilation'
+                    const formatColor = isMicro ? 'bg-amber-500/10 text-amber-300 border-amber-500/30' : isStandard ? 'bg-blue-500/10 text-blue-300 border-blue-500/30' : 'bg-purple-500/10 text-purple-300 border-purple-500/30'
                   const isClean = item.is_clean !== false
                   const hasWm = item.watermark_detected === true || item.is_clean === false
 
@@ -423,16 +499,21 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onIngestSeries }) 
                     >
                       <div>
                         <div className="flex items-center justify-between gap-2 mb-2">
-                          <span
-                            className={`text-[10px] font-mono px-2 py-0.5 rounded border flex items-center gap-1 ${
-                              hasWm
-                                ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
-                                : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                            }`}
-                          >
-                            {hasWm ? <XCircle className="w-3 h-3" /> : <CheckCircle2 className="w-3 h-3" />}
-                            {hasWm ? 'WATERMARKED' : 'CLEAN (READY)'}
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={`text-[10px] font-mono px-2 py-0.5 rounded border flex items-center gap-1 ${
+                                hasWm
+                                  ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                                  : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                              }`}
+                            >
+                              {hasWm ? <XCircle className="w-3 h-3" /> : <CheckCircle2 className="w-3 h-3" />}
+                              {hasWm ? 'WATERMARKED' : 'CLEAN (READY)'}
+                            </span>
+                            <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${formatColor}`}>
+                              {formatBadge}
+                            </span>
+                          </div>
 
                           {item.view_count && (
                             <span className="text-[11px] font-mono text-zinc-400 flex items-center gap-1">

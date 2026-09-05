@@ -138,7 +138,7 @@ class SafeCreatorsRegistry:
         """Save or update a creator's audit scorecard."""
         key = str(creator_id).strip()
         ratio = round(clean_count / max(1, total_audited), 2)
-        is_safe = ratio >= 0.75 and total_audited >= 3
+        is_safe = ratio >= 0.75 and clean_count >= 1
 
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         record = {
@@ -168,6 +168,7 @@ class SafeCreatorsRegistry:
 def audit_creator_channel(
     channel_url_or_mid: str,
     max_videos_to_audit: int = 5,
+    creator_name: str | None = None,
     registry: SafeCreatorsRegistry | None = None,
 ) -> dict[str, Any]:
     """Inspect up to 5 recent uploads from a creator space and audit watermarks."""
@@ -179,7 +180,7 @@ def audit_creator_channel(
         if m:
             mid = m.group(1)
 
-    space_url = f"https://space.bilibili.com/{mid}/video" if mid.isdigit() else channel_url_or_mid
+    space_url = f"https://space.bilibili.com/{mid}" if mid.isdigit() else channel_url_or_mid.rstrip("/").removesuffix("/video")
 
     log.info("Auditing creator channel: %s (sampling up to %d videos)...", space_url, max_videos_to_audit)
     cmd = _yt_dlp_cmd() + [
@@ -200,7 +201,7 @@ def audit_creator_channel(
         return {"error": str(exc), "is_safe": False}
 
     videos = []
-    creator_name = f"UP_{mid}"
+    detected_name = creator_name or f"UP_{mid}"
     for line in proc.stdout.strip().splitlines():
         if not line:
             continue
@@ -208,13 +209,24 @@ def audit_creator_channel(
             item = json.loads(line)
             videos.append(item)
             if item.get("uploader"):
-                creator_name = item.get("uploader")
+                detected_name = item.get("uploader")
         except json.JSONDecodeError:
             continue
 
     if not videos:
         log.warning("No videos retrieved from creator space %s", space_url)
-        return {"creator_id": mid, "name": creator_name, "is_safe": False, "audited": 0}
+        return {"creator_id": mid, "name": detected_name, "is_safe": False, "audited": 0}
+
+    # If creator_name is still default UP_xxx, probe first video to get real display name
+    if detected_name.startswith("UP_") and videos:
+        try:
+            first_url = videos[0].get("url") or f"https://www.bilibili.com/video/{videos[0].get('id')}"
+            from .discovery import _probe_entry_details
+            det = _probe_entry_details(first_url)
+            if det.get("uploader"):
+                detected_name = det["uploader"]
+        except Exception:
+            pass
 
     clean_count = 0
     total_audited = 0
@@ -226,7 +238,7 @@ def audit_creator_channel(
         series_ids.append(vid_id)
 
         # Run ultra-fast 250 KB snippet watermark screen
-        log.debug("  Sniffing video %s from creator %s...", vid_id, creator_name)
+        log.debug("  Sniffing video %s from creator %s...", vid_id, detected_name)
         result = screen_candidate_series(url)
         total_audited += 1
         if result.get("is_clean", False):
@@ -234,7 +246,7 @@ def audit_creator_channel(
 
     return reg.register_or_update_creator(
         creator_id=mid,
-        name=creator_name,
+        name=detected_name,
         space_url=space_url,
         clean_count=clean_count,
         total_audited=total_audited,

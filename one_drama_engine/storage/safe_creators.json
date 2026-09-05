@@ -1,0 +1,396 @@
+{
+  "creators": {
+    "505258902": {
+      "creator_id": "505258902",
+      "name": "言心不厌旧",
+      "space_url": "https://space.bilibili.com/505258902",
+      "clean_count": 0,
+      "total_audited": 1,
+      "clean_ratio": 0.0,
+      "is_verified_safe": false,
+      "last_audited": "2026-09-05 16:01:11",
+      "known_series": []
+    },
+    "3546830222658352": {
+      "creator_id": "3546830222658352",
+      "name": "账号已注销",
+      "space_url": "https://space.bilibili.com/3546830222658352",
+      "clean_count": 0,
+      "total_audited": 1,
+      "clean_ratio": 0.0,
+      "is_verified_safe": false,
+      "last_audited": "2026-09-05 16:01:32",
+      "known_series": []
+    },
+    "1796306296": {
+      "creator_id": "1796306296",
+      "name": "CZZ动漫",
+      "space_url": "https://space.bilibili.com/1796306296",
+      "clean_count": 0,
+      "total_audited": 1,
+      "clean_ratio": 0.0,
+      "is_verified_safe": false,
+      "last_audited": "2026-09-05 16:01:50",
+      "known_series": []
+    },
+    "13210126": {
+      "creator_id": "13210126",
+      "name": "颜伊帆",
+      "space_url": "https://space.bilibili.com/13210126",
+      "clean_count": 1,
+      "total_audited": 1,
+      "clean_ratio": 1.0,
+      "is_verified_safe": true,
+      "last_audited": "2026-09-05 16:02:00",
+      "known_series": [
+        "http://www.bilibili.com/video/av115995842774963"
+      ]
+    },
+    "498788291": {
+      "creator_id": "498788291",
+      "name": "L克隆画亚",
+      "space_url": "https://space.bilibili.com/498788291",
+      "clean_count": 0,
+      "total_audited": 1,
+      "clean_ratio": 0.0,
+      "is_verified_safe": false,
+      "last_audited": "2026-09-05 16:02:10",
+      "known_series": []
+    },
+    "3546863133264513": {
+      "creator_id": "3546863133264513",
+      "name": "辣椒爱吃肉肉",
+      "space_url": "https://space.bilibili.com/3546863133264513",
+      "clean_count": 1,
+      "total_audited": 1,
+      "clean_ratio": 1.0,
+      "is_verified_safe": true,
+      "last_audited": "2026-09-05 16:02:39",
+      "known_series": [
+        "http://www.bilibili.com/video/av117199154973281"
+      ]
+    },
+    "3691012826335275": {
+      "creator_id": "3691012826335275",
+      "name": "發发發-",
+      "space_url": "https://space.bilibili.com/3691012826335275",
+      "clean_count": 0,
+      "total_audited": 1,
+      "clean_ratio": 0.0,
+      "is_verified_safe": false,
+      "last_audited": "2026-09-05 16:02:46",
+      "known_series": []
+    },
+    "3546784341166408": {
+      "creator_id": "3546784341166408",
+      "name": "米号短剧",
+      "space_url": "https://space.bilibili.com/3546784341166408",
+      "clean_count": 0,
+      "total_audited": 1,
+      "clean_ratio": 0.0,
+      "is_verified_safe": false,
+      "last_audited": "2026-09-05 16:02:53",
+      "known_series": []
+    },
+    "434030665": {
+      "creator_id": "434030665",
+      "name": "柠檬酱゜",
+      "space_url": "https://space.bilibili.com/434030665",
+      "clean_count": 0,
+      "total_audited": 1,
+      "clean_ratio": 0.0,
+      "is_verified_safe": false,
+      "last_audited": "2026-09-05 16:03:00",
+      "known_series": []
+    },
+    "3546656291162302": {
+      "creator_id": "3546656291162302",
+      "name": "飞向遥远の天空-",
+      "space_url": "https://space.bilibili.com/3546656291162302",
+      "clean_count": 0,
+      "total_audited": 1,
+      "clean_ratio": 0.0,
+      "is_verified_safe": false,
+      "last_audited": "2026-09-05 16:03:08",
+      "known_series": []
+    },
+    "2046002283": {
+      "creator_id": "2046002283",
+      "name": "美丽漫社",
+      "space_url": "https://space.bilibili.com/2046002283",
+      "clean_count": 0,
+      "total_audited": 1,
+      "clean_ratio": 0.0,
+      "is_verified_safe": false,
+      "last_audited": "2026-09-05 16:03:16",
+      "known_series": []
+    },
+    "488570939": {
+      "creator_id": "488570939",
+      "name": "剑之解说-",
+      "space_url": "https://space.bilibili.com/488570939",
+      "clean_count": 0,
+      "total_audited": 1,
+      "clean_ratio": 0.0,
+      "is_verified_safe": false,
+      "last_audited": "2026-09-05 16:03:25",
+      "known_series": []
+    },
+    "3546902723299930": {
+      "creator_id": "3546902723299930",
+      "name": "王龙虾排",
+      "space_url": "https://space.bilibili.com/3546902723299930",
+      "clean_count": 0,
+      "total_audited": 1,
+      "clean_ratio": 0.0,
+      "is_verified_safe": false,
+      "last_audited": "2026-09-05 16:03:32",
+      "known_series": []
+    },
+    "3493289588165545": {
+      "creator_id": "3493289588165545",
+      "name": "V雨落风V",
+      "space_url": "https://space.bilibili.com/3493289588165545",
+      "clean_count": 1,
+      "total_audited": 1,
+      "clean_ratio": 1.0,
+      "is_verified_safe": true,
+      "last_audited": "2026-09-05 16:03:39",
+      "known_series": [
+        "http://www.bilibili.com/video/av116891343390481"
+      ]
+    },
+    "3546599596755093": {
+      "creator_id": "3546599596755093",
+      "name": "别澜我a",
+      "space_url": "https://space.bilibili.com/3546599596755093",
+      "clean_count": 0,
+      "total_audited": 1,
+      "clean_ratio": 0.0,
+      "is_verified_safe": false,
+      "last_audited": "2026-09-05 16:03:46",
+      "known_series": []
+    },
+    "3707008670763738": {
+      "creator_id": "3707008670763738",
+      "name": "虾虾沙雕动漫馆-",
+      "space_url": "https://space.bilibili.com/3707008670763738",
+      "clean_count": 0,
+      "total_audited": 1,
+      "clean_ratio": 0.0,
+      "is_verified_safe": false,
+      "last_audited": "2026-09-05 16:04:12",
+      "known_series": []
+    },
+    "1476420488": {
+      "creator_id": "1476420488",
+      "name": "萌宅客栈",
+      "space_url": "https://space.bilibili.com/1476420488",
+      "clean_count": 0,
+      "total_audited": 1,
+      "clean_ratio": 0.0,
+      "is_verified_safe": false,
+      "last_audited": "2026-09-05 16:04:19",
+      "known_series": []
+    },
+    "3546666556721549": {
+      "creator_id": "3546666556721549",
+      "name": "苦糖漫社",
+      "space_url": "https://space.bilibili.com/3546666556721549",
+      "clean_count": 0,
+      "total_audited": 1,
+      "clean_ratio": 0.0,
+      "is_verified_safe": false,
+      "last_audited": "2026-09-05 16:04:26",
+      "known_series": []
+    },
+    "591891726": {
+      "creator_id": "591891726",
+      "name": "广告联盟变现软件开发",
+      "space_url": "https://space.bilibili.com/591891726",
+      "clean_count": 1,
+      "total_audited": 1,
+      "clean_ratio": 1.0,
+      "is_verified_safe": true,
+      "last_audited": "2026-09-05 16:04:34",
+      "known_series": [
+        "http://www.bilibili.com/video/av116328736293033"
+      ]
+    },
+    "3546930195991347": {
+      "creator_id": "3546930195991347",
+      "name": "百艺VS陆离",
+      "space_url": "https://space.bilibili.com/3546930195991347",
+      "clean_count": 2,
+      "total_audited": 2,
+      "clean_ratio": 1.0,
+      "is_verified_safe": true,
+      "last_audited": "2026-09-05 16:04:58",
+      "known_series": [
+        "http://www.bilibili.com/video/av117195866703880",
+        "http://www.bilibili.com/video/av117197645024125"
+      ]
+    },
+    "65015653": {
+      "creator_id": "65015653",
+      "name": "恰恰壁纸在动态",
+      "space_url": "https://space.bilibili.com/65015653",
+      "clean_count": 1,
+      "total_audited": 1,
+      "clean_ratio": 1.0,
+      "is_verified_safe": true,
+      "last_audited": "2026-09-05 16:05:04",
+      "known_series": [
+        "http://www.bilibili.com/video/av662329865"
+      ]
+    },
+    "346763026": {
+      "creator_id": "346763026",
+      "name": "L大叔与猫",
+      "space_url": "https://space.bilibili.com/346763026",
+      "clean_count": 1,
+      "total_audited": 1,
+      "clean_ratio": 1.0,
+      "is_verified_safe": true,
+      "last_audited": "2026-09-05 16:05:07",
+      "known_series": [
+        "https://www.bilibili.com/cheese/play/ss514594884?query_from=0&search_id=7451962747113536234&search_query=AI+3D+%E5%8A%A8%E6%80%81%E6%BC%AB"
+      ]
+    },
+    "8874241": {
+      "creator_id": "8874241",
+      "name": "校花电影",
+      "space_url": "https://space.bilibili.com/8874241",
+      "clean_count": 1,
+      "total_audited": 1,
+      "clean_ratio": 1.0,
+      "is_verified_safe": true,
+      "last_audited": "2026-09-05 16:05:13",
+      "known_series": [
+        "http://www.bilibili.com/video/av117121610878679"
+      ]
+    },
+    "172436525": {
+      "creator_id": "172436525",
+      "name": "小洛的动漫剧场",
+      "space_url": "https://space.bilibili.com/172436525",
+      "clean_count": 1,
+      "total_audited": 1,
+      "clean_ratio": 1.0,
+      "is_verified_safe": true,
+      "last_audited": "2026-09-05 16:05:20",
+      "known_series": [
+        "http://www.bilibili.com/video/av117160030570303"
+      ]
+    },
+    "29249111": {
+      "creator_id": "29249111",
+      "name": "天拂晓",
+      "space_url": "https://space.bilibili.com/29249111",
+      "clean_count": 0,
+      "total_audited": 1,
+      "clean_ratio": 0.0,
+      "is_verified_safe": false,
+      "last_audited": "2026-09-05 16:05:28",
+      "known_series": []
+    },
+    "3745007747992383": {
+      "creator_id": "3745007747992383",
+      "name": "ToonWorldAI6556",
+      "space_url": "https://space.bilibili.com/3745007747992383",
+      "clean_count": 1,
+      "total_audited": 1,
+      "clean_ratio": 1.0,
+      "is_verified_safe": true,
+      "last_audited": "2026-09-05 16:05:34",
+      "known_series": [
+        "http://www.bilibili.com/video/av117205547095392"
+      ]
+    },
+    "3707017346681347": {
+      "creator_id": "3707017346681347",
+      "name": "京晶漫剧",
+      "space_url": "https://space.bilibili.com/3707017346681347",
+      "clean_count": 1,
+      "total_audited": 1,
+      "clean_ratio": 1.0,
+      "is_verified_safe": true,
+      "last_audited": "2026-09-05 16:05:39",
+      "known_series": [
+        "http://www.bilibili.com/video/av117206906243168"
+      ]
+    },
+    "3690980272244861": {
+      "creator_id": "3690980272244861",
+      "name": "大白兔动漫",
+      "space_url": "https://space.bilibili.com/3690980272244861",
+      "clean_count": 0,
+      "total_audited": 1,
+      "clean_ratio": 0.0,
+      "is_verified_safe": false,
+      "last_audited": "2026-09-05 16:05:47",
+      "known_series": []
+    },
+    "3707052174084798": {
+      "creator_id": "3707052174084798",
+      "name": "小熊软糖锕",
+      "space_url": "https://space.bilibili.com/3707052174084798",
+      "clean_count": 0,
+      "total_audited": 1,
+      "clean_ratio": 0.0,
+      "is_verified_safe": false,
+      "last_audited": "2026-09-05 16:05:55",
+      "known_series": []
+    },
+    "338892909": {
+      "creator_id": "338892909",
+      "name": "李三果",
+      "space_url": "https://space.bilibili.com/338892909",
+      "clean_count": 0,
+      "total_audited": 1,
+      "clean_ratio": 0.0,
+      "is_verified_safe": false,
+      "last_audited": "2026-09-05 16:06:03",
+      "known_series": []
+    },
+    "1117146808": {
+      "creator_id": "1117146808",
+      "name": "3d漫画韩漫日漫",
+      "space_url": "https://space.bilibili.com/1117146808",
+      "clean_count": 0,
+      "total_audited": 1,
+      "clean_ratio": 0.0,
+      "is_verified_safe": false,
+      "last_audited": "2026-09-05 16:06:14",
+      "known_series": []
+    },
+    "3546913890634447": {
+      "creator_id": "3546913890634447",
+      "name": "大明爆了",
+      "space_url": "https://space.bilibili.com/3546913890634447",
+      "clean_count": 0,
+      "total_audited": 1,
+      "clean_ratio": 0.0,
+      "is_verified_safe": false,
+      "last_audited": "2026-09-05 16:06:21",
+      "known_series": []
+    },
+    "3493287258229639": {
+      "creator_id": "3493287258229639",
+      "name": "敢创漫剧",
+      "space_url": "https://space.bilibili.com/3493287258229639",
+      "clean_count": 2,
+      "total_audited": 2,
+      "clean_ratio": 1.0,
+      "is_verified_safe": true,
+      "last_audited": "2026-09-05 16:09:11",
+      "known_series": [
+        "http://www.bilibili.com/video/av117095991872768",
+        "https://www.bilibili.com/video/BV14i4y66E7M"
+      ]
+    }
+  },
+  "metadata": {
+    "last_updated": "2026-09-05 16:09:11"
+  }
+}

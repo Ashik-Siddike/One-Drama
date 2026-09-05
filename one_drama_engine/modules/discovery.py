@@ -198,7 +198,16 @@ def is_copyright_safe(
 # Search & Discovery Core
 # --------------------------------------------------------------------------- #
 def _yt_dlp_cmd() -> list[str]:
-    """Get the python command list to invoke yt-dlp."""
+    """Get the command list to invoke yt-dlp, preferring project venv."""
+    venv_yt = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", ".venv", "Scripts", "yt-dlp.exe")
+    )
+    if os.path.isfile(venv_yt):
+        return [venv_yt]
+    import shutil
+    yt = shutil.which("yt-dlp")
+    if yt:
+        return [yt]
     return [sys.executable, "-m", "yt_dlp"]
 
 
@@ -209,7 +218,7 @@ _BILIBILI_UA = (
 _BILIBILI_REFERER = "https://www.bilibili.com/"
 
 
-def _probe_entry_details(url: str, timeout: float = 15.0) -> dict[str, Any] | None:
+def _probe_entry_details(url: str, timeout: float = 25.0) -> dict[str, Any] | None:
     """Fetch rich metadata for a single Bilibili URL via yt-dlp."""
     cmd = _yt_dlp_cmd() + [
         "--ignore-config",
