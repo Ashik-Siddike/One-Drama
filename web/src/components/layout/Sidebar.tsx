@@ -87,9 +87,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="h-16 flex items-center justify-between px-4 border-b border-zinc-800/80">
           {!isCollapsed && (
             <div className="flex items-center gap-2.5 overflow-hidden">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-                <Flame className="w-4 h-4 text-white" />
-              </div>
+              <img
+                src="/logo.png"
+                alt="OneDrama"
+                className="w-9 h-9 rounded-xl object-contain shadow-lg shadow-indigo-500/20 border border-zinc-800/80"
+              />
               <div className="flex flex-col">
                 <span className="font-bold text-sm tracking-wide text-zinc-100 uppercase">
                   OneDrama
@@ -102,9 +104,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
 
           {isCollapsed && (
-            <div className="mx-auto w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-md">
-              <Flame className="w-4 h-4 text-white" />
-            </div>
+            <img
+              src="/logo.png"
+              alt="OneDrama"
+              className="mx-auto w-9 h-9 rounded-xl object-contain shadow-md border border-zinc-800/80"
+            />
           )}
 
           <button
