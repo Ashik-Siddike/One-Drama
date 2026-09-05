@@ -738,6 +738,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Browser to extract cookies from (e.g. chrome, edge) for Bilibili VIP content",
     )
+    utilities.add_argument(
+        "--suggest-3d",
+        action="store_true",
+        help="Show daily 3D AI Dynamic Manhua (漫剧) curated suggestions and exit",
+    )
+    utilities.add_argument(
+        "--screen-watermarks",
+        action="store_true",
+        help="Pre-screen candidates for corner watermarks using remote snippet sniffing",
+    )
     return parser
 
 
@@ -756,6 +766,22 @@ def main(argv: list[str] | None = None) -> int:
     except PipelineError as exc:
         log.error("%s", exc)
         return 1
+
+    if args.suggest_3d:
+        from modules import discovery
+
+        suggestions = discovery.generate_daily_3d_suggestions()
+        print("\n" + "=" * 82)
+        print("  🌟 DAILY 3D AI DYNAMIC MANHUA (漫剧) CURATED SUGGESTIONS 🌟")
+        print("=" * 82)
+        for idx, s in enumerate(suggestions, start=1):
+            print(f"[{idx}] {s['icon']}  {s['title']}")
+            print(f"     Chinese: {s['chinese_title']} | Genre: {s['category']}")
+            print(f"     Hook:    {s['hook']}")
+            print(f"     Target:  {s['target_audience']}")
+            print(f"     Search:  python pipeline.py --search \"{s['query']}\" --screen-watermarks")
+            print("-" * 82)
+        return 0
 
     if args.check_env:
         problems = check_environment(config=config)
@@ -809,6 +835,36 @@ def main(argv: list[str] | None = None) -> int:
 
         custom_blocks = config.get("discovery", {}).get("blocked_franchises", [])
         log.info("Searching Bilibili for dynamic manhua: '%s'...", args.search)
+
+        if args.screen_watermarks:
+            log.info("Ultra-low-bandwidth watermark pre-screening enabled (sniffing remote keyframes)...")
+            candidates = discovery.search_and_screen_3d_manhua(
+                args.search, max_candidates=5, screen_watermarks=True, custom_blocklist=custom_blocks
+            )
+            print("\n" + "=" * 82)
+            print(f"{'#':<3} {'STATUS':<10} {'EFS':<8} {'EPS':<6} {'SERIES TITLE & AUDIT'}")
+            print("=" * 82)
+            clean_candidates = []
+            for idx, c in enumerate(candidates, start=1):
+                badge = "[CLEAN]" if c.get("is_clean") else "[DIRTY]"
+                score_str = f"{c.get('efs_score', 0):.1f}pt"
+                print(f"{idx:<3} {badge:<10} {score_str:<8} {c.get('episodes', 1):<6} {c['title'][:48]}")
+                print(f"    URL: {c['url']} | Author: {c['uploader']} | Views: {c['view_count']}")
+                if not c.get("is_clean"):
+                    print(f"    [!] Watermark detected in {c.get('watermark_zone')} (confidence: {c.get('watermark_audit', {}).get('confidence')}) -> EXCLUDED")
+                else:
+                    clean_candidates.append(c)
+                print("-" * 82)
+
+            if clean_candidates:
+                log.info(
+                    "\nTop Approved Clean Series (Ready for Dubbing):\n  python pipeline.py --download-series \"%s\"",
+                    clean_candidates[0]["url"],
+                )
+            else:
+                log.warning("No clean, watermark-free series found for this query. Try another theme.")
+            return 0
+
         candidates = discovery.search_manhua_series(args.search, custom_blocklist=custom_blocks)
         print(discovery.format_catalogue_table(candidates))
         if candidates:

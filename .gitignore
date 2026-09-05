@@ -68,6 +68,8 @@ one_drama_engine/storage/master_export/*
 !one_drama_engine/storage/master_export/.gitkeep
 one_drama_engine/storage/voice_reference/*.wav
 !one_drama_engine/storage/voice_reference/README.md
+one_drama_engine/storage/archive_previous_run/
+one_drama_engine/storage/previews/
 
 # HuggingFace & PyTorch model caches
 *.safetensors

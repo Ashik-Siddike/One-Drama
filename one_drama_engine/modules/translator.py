@@ -430,6 +430,8 @@ def generate_recap_script(
                     len(payload),
                 )
                 last_error = None
+                if len(clients) > 1:
+                    client_idx += 1
                 break
 
             except PipelineError as exc:

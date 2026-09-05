@@ -530,6 +530,47 @@ def search_manhua(q: str = Query(..., min_length=1), max_results: int = 6):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+class Search3DRequest(BaseModel):
+    query: str
+    max_candidates: int = 5
+    screen_watermarks: bool = True
+
+
+class ScreenWatermarkRequest(BaseModel):
+    url: str
+
+
+@app.get("/api/discovery/daily_suggestions")
+def get_daily_3d_suggestions():
+    return {
+        "status": "success",
+        "suggestions": discovery.generate_daily_3d_suggestions(),
+    }
+
+
+@app.post("/api/discovery/search_3d")
+def search_3d_manhua(req: Search3DRequest):
+    try:
+        results = discovery.search_and_screen_3d_manhua(
+            query=req.query,
+            max_candidates=req.max_candidates,
+            screen_watermarks=req.screen_watermarks,
+        )
+        return {"query": req.query, "count": len(results), "results": results}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/discovery/screen_watermark")
+def audit_watermark(req: ScreenWatermarkRequest):
+    try:
+        from modules import watermark_detector
+        res = watermark_detector.screen_candidate_series(req.url)
+        return res
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 # --------------------------------------------------------------------------- #
 # Pipeline Execution & Background Tasks
 # --------------------------------------------------------------------------- #

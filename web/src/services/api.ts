@@ -53,6 +53,38 @@ export async function searchManhua(
   return res.json()
 }
 
+export async function fetchDaily3DSuggestions(): Promise<{
+  status: string
+  suggestions: Array<{
+    id: string
+    title: string
+    chinese_title: string
+    query: string
+    hook: string
+    category: string
+    target_audience: string
+    icon: string
+  }>
+}> {
+  const res = await fetch(`${API_BASE}/discovery/daily_suggestions`)
+  if (!res.ok) throw new Error('Failed to fetch daily 3D suggestions')
+  return res.json()
+}
+
+export async function search3DManhua(
+  query: string,
+  max_candidates = 5,
+  screen_watermarks = true
+): Promise<{ count: number; results: any[] }> {
+  const res = await fetch(`${API_BASE}/discovery/search_3d`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, max_candidates, screen_watermarks }),
+  })
+  if (!res.ok) throw new Error('Failed to search 3D manhua')
+  return res.json()
+}
+
 export async function triggerDownload(query_or_url: string, limit?: number) {
   const res = await fetch(`${API_BASE}/pipeline/download`, {
     method: 'POST',

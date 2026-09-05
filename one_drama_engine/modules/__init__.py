@@ -34,6 +34,8 @@ __all__ = [
     "video_processor",
     "concatenator",
     "seo_generator",
+    "drive_sync",
+    "watermark_detector",
     # helpers
     "PipelineError",
     "MissingDependencyError",
@@ -64,6 +66,8 @@ _LAZY_SUBMODULES = frozenset(
         "video_processor",
         "concatenator",
         "seo_generator",
+        "drive_sync",
+        "watermark_detector",
     }
 )
 
