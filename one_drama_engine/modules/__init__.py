@@ -36,9 +36,9 @@ __all__ = [
     "seo_generator",
     "drive_sync",
     "watermark_detector",
-    "filler_trimmer",
     "channel_scout",
     "shorts_generator",
+    "workspace_manager",
     # helpers
     "PipelineError",
     "MissingDependencyError",
@@ -71,9 +71,9 @@ _LAZY_SUBMODULES = frozenset(
         "seo_generator",
         "drive_sync",
         "watermark_detector",
-        "filler_trimmer",
         "channel_scout",
         "shorts_generator",
+        "workspace_manager",
     }
 )
 

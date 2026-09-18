@@ -20,6 +20,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import time
 from typing import Any, Iterable, Sequence
 
@@ -29,6 +30,7 @@ from . import (
     PipelineError,
     ensure_dir,
     ffprobe_duration,
+    ffprobe_has_audio,
     log,
     require_binary,
     run_command,
@@ -126,6 +128,17 @@ def _episode_name(index: int, extension: str = ".mp4") -> str:
 
 def _yt_dlp_command() -> list[str]:
     """Return the best available way to invoke yt-dlp."""
+    venv_yt = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", ".venv", "Scripts", "yt-dlp.exe")
+    )
+    venv_py = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", ".venv", "Scripts", "python.exe")
+    )
+    if os.path.isfile(venv_yt):
+        return [venv_yt]
+    if os.path.isfile(venv_py):
+        return [venv_py, "-m", "yt_dlp"]
+
     binary = shutil.which("yt-dlp")
     if binary:
         return [binary]
@@ -139,6 +152,24 @@ def _yt_dlp_command() -> list[str]:
         raise PipelineError(
             "yt-dlp is unavailable. Install it with: pip install yt-dlp"
         ) from exc
+
+
+def _get_bin_dir() -> str:
+    """Return the absolute path to one_drama_engine/bin."""
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "bin"))
+
+
+def _get_aria2c_path() -> str | None:
+    """Detect portable or system-installed aria2c binary."""
+    bin_dir = _get_bin_dir()
+    local_aria = os.path.join(bin_dir, "aria2c.exe" if os.name == "nt" else "aria2c")
+    if os.path.isfile(local_aria):
+        return local_aria
+    which_aria = shutil.which("aria2c")
+    if which_aria:
+        return which_aria
+    return None
+
 
 
 def _validate_download(path: str, min_bytes: int = 32_768) -> None:
@@ -168,6 +199,8 @@ def download_bilibili_playlist(
     ),
     extra_args: Sequence[str] | None = None,
     retries: int = 3,
+    progress_callback: Any = None,
+    on_episode_ready: Any = None,
 ) -> list[str]:
     """Download every video in *playlist_url* into *output_dir* as ``ep_NNN.mp4``.
 
@@ -195,12 +228,8 @@ def download_bilibili_playlist(
     if base_index < 1:
         raise PipelineError("start_index must be >= 1")
 
-    # Download into a staging dir so a partial run never pollutes raw_episodes/.
+    # Download into a staging dir; keep partial downloads (.part, .aria2, .ytdl) so runs can resume seamlessly.
     staging = ensure_dir(os.path.join(output_dir, ".staging"))
-    for stale in os.listdir(staging):
-        stale_path = os.path.join(staging, stale)
-        if os.path.isfile(stale_path):
-            os.remove(stale_path)
 
     argv = _yt_dlp_command() + [
         "--ignore-config",
@@ -208,12 +237,19 @@ def download_bilibili_playlist(
         "--newline",
         "--no-overwrites",
         "--continue",
+        "--ignore-errors",
         "--retries",
         "10",
         "--fragment-retries",
         "10",
         "--concurrent-fragments",
-        "4",
+        "8",
+        "--buffer-size",
+        "1024K",
+        "--http-chunk-size",
+        "10M",
+        "--socket-timeout",
+        "15",
         "--yes-playlist",
         "--playlist-start",
         "1",
@@ -231,6 +267,25 @@ def download_bilibili_playlist(
         os.path.join(staging, "%(playlist_index)05d_%(id)s.%(ext)s"),
     ]
 
+    aria_path = _get_aria2c_path()
+    if aria_path:
+        log.info(
+            "⚡ Supercharged Multi-Connection Downloader Active (Hybrid Turbo Engine): %s",
+            aria_path,
+        )
+        argv += [
+            "--downloader",
+            "dash,m3u8:native",
+            "--downloader",
+            "default:aria2c",
+            "--downloader-args",
+            (
+                "aria2c:-c -s 6 -x 6 -k 10M -j 6 --min-split-size=10M "
+                "--lowest-speed-limit=50K --timeout=15 --connect-timeout=10 "
+                "--max-tries=15 --retry-wait=2 --disk-cache=32M --auto-file-renaming=false"
+            ),
+        ]
+
     if max_episodes:
         argv += ["--playlist-end", str(int(max_episodes))]
     if cookies_from_browser:
@@ -239,16 +294,157 @@ def download_bilibili_playlist(
         if not os.path.isfile(cookie_file):
             raise PipelineError(f"cookie_file not found: {cookie_file}")
         argv += ["--cookies", cookie_file]
+
     if extra_args:
         argv += [str(a) for a in extra_args]
 
     argv.append(playlist_url)
 
+    env = os.environ.copy()
+    bin_dir = _get_bin_dir()
+    if os.path.isdir(bin_dir):
+        env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
+
+    final_paths: list[str] = []
+    current_index = base_index
+
+    def _sweep_staged_completed():
+        nonlocal current_index
+        if not os.path.isdir(staging):
+            return
+        try:
+            entries = os.listdir(staging)
+        except Exception:
+            return
+
+        lock_exts = (".part", ".aria2", ".ytdl", ".temp")
+        active_locks = {f for f in entries if f.endswith(lock_exts)}
+
+        candidates = sorted(
+            [
+                f
+                for f in entries
+                if _is_video(f)
+                and not any(l.startswith(f) for l in active_locks)
+                and not bool(re.search(r"\.f[a-zA-Z0-9_-]+\.", f))
+            ]
+        )
+        for cand in candidates:
+            staged_path = os.path.join(staging, cand)
+            if not os.path.isfile(staged_path):
+                continue
+            try:
+                sz = os.path.getsize(staged_path)
+            except Exception:
+                continue
+            if sz < 256 * 1024:
+                continue
+
+            # If yt-dlp is still downloading companion audio for this video, wait for merge
+            stem = cand.rsplit(".", 1)[0]
+            if any(
+                f.startswith(stem) and f.endswith((".m4a", ".aac", ".opus", ".ogg", ".wav"))
+                for f in entries
+            ):
+                continue
+
+            # Ensure video file is fully merged and carries a valid audio stream
+            try:
+                if not ffprobe_has_audio(staged_path):
+                    continue
+            except Exception:
+                continue
+
+            ext = os.path.splitext(cand)[1].lower() or ".mp4"
+            m = re.match(r"^(\d+)_", cand)
+            if m:
+                ep_num = int(m.group(1))
+                target = os.path.join(output_dir, _episode_name(base_index + ep_num - 1, ext))
+            else:
+                target = os.path.join(output_dir, _episode_name(current_index, ext))
+                current_index += 1
+            if os.path.exists(target):
+                try:
+                    os.remove(target)
+                except Exception:
+                    pass
+            try:
+                shutil.move(staged_path, target)
+                _validate_download(target)
+                dur = ffprobe_duration(target)
+                log.info(
+                    "⚡ [Stream Downloader] Ready: %s (%.1f MiB, %.0fs) -> Dispatched to AI Pipeline!",
+                    os.path.basename(target),
+                    sz / 1048576,
+                    dur,
+                )
+                final_paths.append(target)
+                current_index += 1
+                if on_episode_ready:
+                    try:
+                        on_episode_ready(target)
+                    except Exception as cb_err:
+                        log.error("Error in on_episode_ready callback for %s: %s", target, cb_err)
+            except (PermissionError, OSError) as move_err:
+                log.debug("Temporary file lock on %s: %s", cand, move_err)
+
     last_error: Exception | None = None
     for attempt in range(1, max(1, retries) + 1):
         log.info("yt-dlp playlist fetch (attempt %d/%d): %s", attempt, retries, playlist_url)
         try:
-            run_command(argv, desc="yt-dlp", capture=False, check=True)
+            log.debug("exec: %s", " ".join(str(a) for a in argv))
+            proc = subprocess.Popen(
+                [str(a) for a in argv],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            output_lines = []
+            for line in iter(proc.stdout.readline, ""):
+                clean = line.strip()
+                if not clean:
+                    continue
+                output_lines.append(clean)
+                clow = clean.lower()
+                if (
+                    "download" in clow
+                    or "merger" in clow
+                    or "%" in clean
+                    or "dl:" in clow
+                    or "cn:" in clow
+                ):
+                    log.info("yt-dlp/aria2: %s", clean)
+                    if progress_callback:
+                        try:
+                            progress_callback(clean)
+                        except Exception:
+                            pass
+                # Check for and dispatch completed episodes on the fly
+                _sweep_staged_completed()
+
+            proc.wait()
+
+            # Sweep any remaining completed files
+            for _ in range(6):
+                _sweep_staged_completed()
+                if not os.path.isdir(staging) or not any(_is_video(f) for f in os.listdir(staging)):
+                    break
+                time.sleep(0.5)
+
+            staged_count = len([f for f in os.listdir(staging) if _is_video(f)]) if os.path.isdir(staging) else 0
+            if proc.returncode != 0:
+                if len(final_paths) == 0 and staged_count == 0:
+                    tail = "\n".join(output_lines[-25:]) if output_lines else "(no output captured)"
+                    raise PipelineError(f"yt-dlp failed with exit code {proc.returncode}:\n{tail}")
+                else:
+                    log.warning(
+                        "yt-dlp exited with non-zero code %d (likely VIP or restricted episode in season), but %d video files were downloaded. Proceeding.",
+                        proc.returncode,
+                        len(final_paths) + staged_count,
+                    )
             last_error = None
             break
         except PipelineError as exc:
@@ -257,10 +453,7 @@ def download_bilibili_playlist(
             if attempt < retries:
                 time.sleep(min(30, 5 * attempt))
 
-    downloaded = sorted(
-        os.path.join(staging, name) for name in os.listdir(staging) if _is_video(name)
-    )
-    if not downloaded:
+    if not final_paths:
         raise PipelineError(
             f"yt-dlp downloaded nothing from {playlist_url}."
             + (f" Last error: {last_error}" if last_error else "")
@@ -268,26 +461,8 @@ def download_bilibili_playlist(
     if last_error:
         log.warning(
             "yt-dlp reported an error but %d file(s) landed; keeping them.",
-            len(downloaded),
+            len(final_paths),
         )
-
-    final_paths: list[str] = []
-    for offset, staged in enumerate(downloaded):
-        extension = os.path.splitext(staged)[1].lower() or ".mp4"
-        target = os.path.join(output_dir, _episode_name(base_index + offset, extension))
-        if os.path.exists(target):
-            log.warning("Overwriting existing %s", os.path.basename(target))
-            os.remove(target)
-        shutil.move(staged, target)
-        _validate_download(target)
-        duration = ffprobe_duration(target)
-        log.info(
-            "  -> %s (%.1f MiB, %.0fs)",
-            os.path.basename(target),
-            os.path.getsize(target) / 1048576,
-            duration,
-        )
-        final_paths.append(target)
 
     shutil.rmtree(staging, ignore_errors=True)
     log.info("Playlist complete: %d episode(s) in %s", len(final_paths), output_dir)
@@ -572,6 +747,8 @@ def download_series_by_query(
     auto_select: bool = True,
     cookies_from_browser: str | None = None,
     custom_blocklist: Sequence[str] | None = None,
+    progress_callback: Any = None,
+    on_episode_ready: Any = None,
 ) -> list[str]:
     """Download a manhua series by Bilibili URL or by searching for title/keywords.
 
@@ -584,12 +761,73 @@ def download_series_by_query(
 
     if query.startswith("http://") or query.startswith("https://"):
         log.info("Direct URL detected. Initiating download: %s", query)
-        return download_bilibili_playlist(
+        paths = download_bilibili_playlist(
             query,
             output_dir,
             max_episodes=limit,
             cookies_from_browser=cookies_from_browser,
+            progress_callback=progress_callback,
+            on_episode_ready=on_episode_ready,
         )
+        # Smart Teaser Guard: Check if the downloaded clip is only an ultra-short promotional teaser (< 50s)
+        # Genuine 3D short-drama episodes are 1.5 - 3.5 minutes (90s - 210s) and are NOT teasers!
+        if paths and len(paths) == 1:
+            dur = ffprobe_duration(paths[0])
+            filename = os.path.basename(paths[0])
+            is_trailer = (0 < dur < 50.0) and bool(re.search(r"(片花|预告|试看|PV|trailer|teaser)", filename, re.IGNORECASE))
+            if is_trailer:
+                log.warning(
+                    "⚠️ Smart Teaser Guard: Downloaded clip is only %.1fs (< 50s) with trailer keywords. "
+                    "This is a promotional teaser/trailer, not a serialized drama episode!",
+                    dur,
+                )
+                from . import discovery
+
+                probed = discovery._probe_entry_details(query)
+                raw_title = (probed.get("title") if probed else "") or filename
+                clean_title = re.sub(r"(片花|预告|试看|PV|3D|动态漫|动态漫画|4K|1080P)", "", raw_title).strip()
+                if not clean_title:
+                    clean_title = raw_title
+                search_q = f"{clean_title} 3D 漫剧 分P"
+                log.info("🔍 Auto-searching Bilibili for serialized short-episode series: '%s'...", search_q)
+                candidates = discovery.search_manhua_series(search_q, max_results=5, custom_blocklist=custom_blocklist)
+                if candidates:
+                    full_cand = candidates[0]
+                    log.info(
+                        "🎯 Found serialized series replacement: '%s' (%s, %d eps, %.0fs). Switching download...",
+                        full_cand["title"],
+                        full_cand["url"],
+                        full_cand["episodes"],
+                        full_cand.get("duration_seconds", 0),
+                    )
+                    for p in paths:
+                        if os.path.isfile(p):
+                            try:
+                                os.remove(p)
+                            except Exception:
+                                pass
+                    return download_bilibili_playlist(
+                        full_cand["url"],
+                        output_dir,
+                        max_episodes=limit,
+                        cookies_from_browser=cookies_from_browser,
+                        progress_callback=progress_callback,
+                        on_episode_ready=on_episode_ready,
+                    )
+                else:
+                    log.warning(
+                        "No serialized short-episode series found on Bilibili for '%s'. Proceeding with clip.",
+                        clean_title,
+                    )
+            elif dur > 600.0:
+                log.warning(
+                    "⚠️ Notice: Downloaded single video is %.1fs (%.1f mins). "
+                    "OneDrama is optimized for 1.5 - 3.5 min short episodes. "
+                    "The pipeline's Demucs Sliding Chunk Protector will safely isolate stems without RAM OOM.",
+                    dur,
+                    dur / 60.0,
+                )
+        return paths
 
     from . import discovery
 
@@ -613,6 +851,8 @@ def download_series_by_query(
         output_dir,
         max_episodes=limit,
         cookies_from_browser=cookies_from_browser,
+        progress_callback=progress_callback,
+        on_episode_ready=on_episode_ready,
     )
 
 

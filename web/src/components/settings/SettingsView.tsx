@@ -109,20 +109,73 @@ export const SettingsView: React.FC = () => {
             Visual Remastering & Watermark Inpainting (FFmpeg)
           </h3>
 
+          {/* Watermark & Subtitle Treatment Options */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="text-[11px] font-mono uppercase text-zinc-400 block mb-1">
-                Subtitle Bottom Crop (Pixels)
+                Bottom Subtitle Treatment
               </label>
-              <input
-                type="number"
-                value={cfg.visual_filters?.crop_bottom ?? 80}
+              <select
+                value={cfg.visual_filters?.bottom_subtitle_treatment ?? 'glassmorphism'}
                 onChange={(e) =>
                   setCfg({
                     ...cfg,
                     visual_filters: {
                       ...cfg.visual_filters,
-                      crop_bottom: parseInt(e.target.value, 10) || 0,
+                      bottom_subtitle_treatment: e.target.value,
+                    },
+                  })
+                }
+                className="w-full px-3 py-2 rounded-xl bg-black/60 border border-zinc-800 text-xs text-zinc-200 focus:outline-none font-mono"
+              >
+                <option value="feathered_gaussian">Feathered Gaussian Blur (Smart Subtitle Plate - Recommended)</option>
+                <option value="glassmorphism">Frosted Glassmorphism Blur</option>
+                <option value="crop">Legacy Hard Crop (Cuts bottom edge)</option>
+                <option value="none">None (Keep untouched)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-mono uppercase text-zinc-400 block mb-1">
+                Right-Edge Watermark Action
+              </label>
+              <select
+                value={cfg.visual_filters?.side_watermark_action ?? 'auto_crop'}
+                onChange={(e) =>
+                  setCfg({
+                    ...cfg,
+                    visual_filters: {
+                      ...cfg.visual_filters,
+                      side_watermark_action: e.target.value,
+                    },
+                  })
+                }
+                className="w-full px-3 py-2 rounded-xl bg-black/60 border border-zinc-800 text-xs text-zinc-200 focus:outline-none font-mono"
+              >
+                <option value="auto_crop">Smart Side-Crop (Recommended - 80-100px)</option>
+                <option value="delogo">Inpaint / Delogo Only</option>
+                <option value="none">None</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
+            <div>
+              <label className="text-[11px] font-mono uppercase text-zinc-400 block mb-1">
+                Glassmorphism Opacity (0.2 - 0.9)
+              </label>
+              <input
+                type="number"
+                step="0.05"
+                min="0.2"
+                max="0.95"
+                value={cfg.visual_filters?.glassmorphism_opacity ?? 0.65}
+                onChange={(e) =>
+                  setCfg({
+                    ...cfg,
+                    visual_filters: {
+                      ...cfg.visual_filters,
+                      glassmorphism_opacity: parseFloat(e.target.value) || 0.65,
                     },
                   })
                 }
@@ -132,7 +185,27 @@ export const SettingsView: React.FC = () => {
 
             <div>
               <label className="text-[11px] font-mono uppercase text-zinc-400 block mb-1">
-                Anti-Fingerprint Zoom Percent
+                Side Watermark Crop (Pixels)
+              </label>
+              <input
+                type="number"
+                value={cfg.visual_filters?.side_watermark_crop_px ?? 80}
+                onChange={(e) =>
+                  setCfg({
+                    ...cfg,
+                    visual_filters: {
+                      ...cfg.visual_filters,
+                      side_watermark_crop_px: parseInt(e.target.value, 10) || 80,
+                    },
+                  })
+                }
+                className="w-full px-3 py-2 rounded-xl bg-black/60 border border-zinc-800 text-xs text-zinc-200 focus:outline-none font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="text-[11px] font-mono uppercase text-zinc-400 block mb-1">
+                Anti-Fingerprint Zoom
               </label>
               <input
                 type="number"
@@ -150,13 +223,75 @@ export const SettingsView: React.FC = () => {
                 className="w-full px-3 py-2 rounded-xl bg-black/60 border border-zinc-800 text-xs text-zinc-200 focus:outline-none font-mono"
               />
             </div>
+
+            <div>
+              <label className="text-[11px] font-mono uppercase text-zinc-400 block mb-1">
+                Hash-Breaker Grain (1-5)
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="8"
+                value={cfg.visual_filters?.noise_strength ?? 2}
+                onChange={(e) =>
+                  setCfg({
+                    ...cfg,
+                    visual_filters: {
+                      ...cfg.visual_filters,
+                      noise_strength: parseInt(e.target.value, 10) || 2,
+                    },
+                  })
+                }
+                className="w-full px-3 py-2 rounded-xl bg-black/60 border border-zinc-800 text-xs text-zinc-200 focus:outline-none font-mono"
+              />
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
             <label className="flex items-center gap-3 p-3 rounded-xl bg-black/40 border border-zinc-800/60 cursor-pointer">
               <input
                 type="checkbox"
-                checked={cfg.visual_filters?.remove_watermark ?? false}
+                checked={cfg.visual_filters?.auto_detect_watermarks ?? true}
+                onChange={(e) =>
+                  setCfg({
+                    ...cfg,
+                    visual_filters: {
+                      ...cfg.visual_filters,
+                      auto_detect_watermarks: e.target.checked,
+                    },
+                  })
+                }
+                className="w-4 h-4 accent-indigo-500 rounded"
+              />
+              <span className="text-xs text-zinc-300 font-medium">
+                Auto-Detect Subtitle & Logos
+              </span>
+            </label>
+
+            <label className="flex items-center gap-3 p-3 rounded-xl bg-black/40 border border-zinc-800/60 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={cfg.visual_filters?.visual_hash_breaker ?? true}
+                onChange={(e) =>
+                  setCfg({
+                    ...cfg,
+                    visual_filters: {
+                      ...cfg.visual_filters,
+                      visual_hash_breaker: e.target.checked,
+                    },
+                  })
+                }
+                className="w-4 h-4 accent-indigo-500 rounded"
+              />
+              <span className="text-xs text-zinc-300">
+                Anti-Fingerprint Hash Breaker
+              </span>
+            </label>
+
+            <label className="flex items-center gap-3 p-3 rounded-xl bg-black/40 border border-zinc-800/60 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={cfg.visual_filters?.remove_watermark ?? true}
                 onChange={(e) =>
                   setCfg({
                     ...cfg,
@@ -169,14 +304,14 @@ export const SettingsView: React.FC = () => {
                 className="w-4 h-4 accent-indigo-500 rounded"
               />
               <span className="text-xs text-zinc-300">
-                Auto Delogo Top-Left Watermark (Bilibili / UP Tag)
+                Delogo Corner Watermark
               </span>
             </label>
 
             <label className="flex items-center gap-3 p-3 rounded-xl bg-black/40 border border-zinc-800/60 cursor-pointer">
               <input
                 type="checkbox"
-                checked={cfg.visual_filters?.remove_right_disclaimer ?? false}
+                checked={cfg.visual_filters?.remove_right_disclaimer ?? true}
                 onChange={(e) =>
                   setCfg({
                     ...cfg,
@@ -189,7 +324,7 @@ export const SettingsView: React.FC = () => {
                 className="w-4 h-4 accent-indigo-500 rounded"
               />
               <span className="text-xs text-zinc-300">
-                Auto Inpaint Right Vertical Disclaimer Text
+                Remove Right Disclaimer
               </span>
             </label>
           </div>

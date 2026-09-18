@@ -23,23 +23,44 @@ export const HardwareMetrics: React.FC<HardwareMetricsProps> = ({ stats }) => {
             <span>GPU Acceleration</span>
           </div>
           <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-            CUDA 12.4
+            CUDA & NVENC
           </span>
         </div>
 
         <div className="space-y-2">
-          <div className="text-sm font-medium text-zinc-100 truncate">
-            {gpu.name || 'NVIDIA GeForce RTX 4060'}
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium text-zinc-100 truncate">
+              {gpu.name || 'NVIDIA GeForce RTX 4060'}
+            </div>
+            {gpu.temperature_c ? (
+              <span className="text-[10px] font-mono text-zinc-400">
+                {gpu.temperature_c}°C
+              </span>
+            ) : null}
           </div>
 
           <div className="flex items-center justify-between text-xs font-mono text-zinc-400">
+            <span>Compute Load</span>
+            <span className="text-emerald-400 font-semibold">
+              {gpu.util_percent ?? 0}%
+            </span>
+          </div>
+
+          <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-emerald-500 transition-all duration-500"
+              style={{ width: `${Math.min(100, gpu.util_percent ?? 0)}%` }}
+            />
+          </div>
+
+          <div className="flex items-center justify-between text-xs font-mono text-zinc-400 pt-1">
             <span>VRAM Allocation</span>
             <span className="text-zinc-200">
               {gpu.vram_used_gb} / {gpu.vram_total_gb} GB ({gpu.vram_percent}%)
             </span>
           </div>
 
-          <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden">
+          <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
             <div
               className="h-full bg-gradient-to-r from-indigo-500 to-violet-500 transition-all duration-500"
               style={{ width: `${Math.min(100, gpu.vram_percent)}%` }}

@@ -1,11 +1,54 @@
-import { useState } from 'react'
-import { Music, Volume2, Sliders, Activity, Mic, VolumeX, ShieldCheck } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Music, Volume2, Sliders, Activity, Mic, VolumeX, ShieldCheck, Save, Check } from 'lucide-react'
+import { fetchSettings, saveSettings } from '../../services/api'
 
 export const AudioStudioView: React.FC = () => {
   const [bgmDucking, setBgmDucking] = useState(0.35)
   const [voiceVol, setVoiceVol] = useState(1.0)
   const [sfxVol, setSfxVol] = useState(0.8)
   const [ambientVol, setAmbientVol] = useState(0.5)
+  const [config, setConfig] = useState<any>(null)
+  const [saving, setSaving] = useState(false)
+  const [savedSuccess, setSavedSuccess] = useState(false)
+
+  useEffect(() => {
+    fetchSettings()
+      .then((cfg) => {
+        setConfig(cfg)
+        if (cfg?.audio_mixing) {
+          if (typeof cfg.audio_mixing.bgm_volume === 'number') {
+            setBgmDucking(cfg.audio_mixing.bgm_volume)
+          }
+          if (typeof cfg.audio_mixing.voice_volume === 'number') {
+            setVoiceVol(cfg.audio_mixing.voice_volume)
+          }
+        }
+      })
+      .catch((err) => console.error('Failed to load audio settings:', err))
+  }, [])
+
+  const handleSaveMix = async () => {
+    if (!config) return
+    try {
+      setSaving(true)
+      const updated = {
+        ...config,
+        audio_mixing: {
+          ...config.audio_mixing,
+          bgm_volume: bgmDucking,
+          voice_volume: voiceVol,
+        },
+      }
+      await saveSettings(updated)
+      setConfig(updated)
+      setSavedSuccess(true)
+      setTimeout(() => setSavedSuccess(false), 3000)
+    } catch (err) {
+      console.error('Failed to save audio mix:', err)
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
@@ -28,9 +71,29 @@ export const AudioStudioView: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-mono">
-          <ShieldCheck className="w-4 h-4" />
-          <span>YouTube Standard: -14.0 LUFS</span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-mono">
+            <ShieldCheck className="w-4 h-4" />
+            <span>YouTube Standard: -14.0 LUFS</span>
+          </div>
+
+          <button
+            onClick={handleSaveMix}
+            disabled={saving || !config}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-800 text-white text-xs font-semibold tracking-wide transition-all shadow-md shadow-indigo-600/20"
+          >
+            {savedSuccess ? (
+              <>
+                <Check className="w-4 h-4 text-emerald-400" />
+                <span>Mix Saved!</span>
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4" />
+                <span>{saving ? 'Saving...' : 'Save Audio Mix to Engine'}</span>
+              </>
+            )}
+          </button>
         </div>
       </div>
 

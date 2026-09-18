@@ -86,13 +86,14 @@ export const SceneEditorView: React.FC = () => {
   // Load scenes and intro/outro audit when selected video changes
   useEffect(() => {
     if (!selectedVideo) return
+    const fallbackStem = videoList.find((v) => v.stem && v.stem !== 'master' && v.stem !== 'shorts')?.stem || 'ep_001'
     const stem = selectedVideo.stem && selectedVideo.stem !== 'master' && selectedVideo.stem !== 'shorts'
       ? selectedVideo.stem
-      : 'ep_001'
+      : fallbackStem
 
     loadScenesForStem(stem)
     loadIntroOutroAudit(stem)
-  }, [selectedVideo])
+  }, [selectedVideo, videoList])
 
   const loadScenesForStem = async (stem: string) => {
     try {

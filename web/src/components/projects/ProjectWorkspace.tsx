@@ -1,22 +1,39 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   FolderKanban,
   CheckCircle2,
   FileText,
   ChevronRight,
   Eye,
+  UploadCloud,
+  Sparkles,
+  FolderOpen,
+  Play,
 } from 'lucide-react'
 import type { ProjectData } from '../../types'
-import { fetchEpisodeDetails } from '../../services/api'
+import { fetchEpisodeDetails, openFolderInFileManager } from '../../services/api'
+import { LocalImportDropzone } from './LocalImportDropzone'
 
 interface ProjectWorkspaceProps {
   projectData: ProjectData | null
+  onRefresh?: () => Promise<void>
+  onAutoProduce?: (opts: { query_or_url: string; limit?: number }) => Promise<void>
+  onRunPipeline?: (limit?: number) => Promise<void>
+  isBusy?: boolean
 }
 
-export const ProjectWorkspace: React.FC<ProjectWorkspaceProps> = ({ projectData }) => {
+export const ProjectWorkspace: React.FC<ProjectWorkspaceProps> = ({
+  projectData,
+  onRefresh,
+  onAutoProduce,
+  onRunPipeline,
+  isBusy = false,
+}) => {
   const [selectedStem, setSelectedStem] = useState<string | null>(null)
   const [episodeDetails, setEpisodeDetails] = useState<any>(null)
   const [isLoadingDetails, setIsLoadingDetails] = useState(false)
+  const [showImportModal, setShowImportModal] = useState(false)
 
   const episodes = projectData?.episodes || []
 
@@ -34,7 +51,7 @@ export const ProjectWorkspace: React.FC<ProjectWorkspaceProps> = ({ projectData 
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative">
       {/* Workspace Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-5 rounded-2xl bg-zinc-900/60 border border-zinc-800/80 backdrop-blur-sm">
         <div className="flex items-center gap-3">
@@ -55,19 +72,68 @@ export const ProjectWorkspace: React.FC<ProjectWorkspaceProps> = ({ projectData 
             </p>
           </div>
         </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          {episodes.length > 0 && onRunPipeline && (
+            <button
+              type="button"
+              onClick={() => onRunPipeline()}
+              disabled={isBusy}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-40 text-white text-xs font-black transition-all shadow-lg shadow-emerald-600/30 transform hover:scale-[1.02]"
+            >
+              <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+              <span>🎬 এই {episodes.length}টি ভিডিও দিয়ে সরাসরি ফুল মুভি বানাও</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => openFolderInFileManager({ category: 'processed' })}
+            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-zinc-800/90 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold font-mono border border-zinc-700/80 transition-all shadow-sm"
+            title="Open storage/processed_episodes in Windows File Explorer"
+          >
+            <FolderOpen className="w-4 h-4 text-emerald-400" />
+            <span>📂 ডাবড ফোল্ডার</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowImportModal(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/20"
+          >
+            <UploadCloud className="w-4 h-4" />
+            <span>📥 ড্র্যাগ-ড্রপ / নতুন ড্রামা ইনপোর্ট</span>
+          </button>
+        </div>
       </div>
 
       {/* Main Grid & Inspector Split */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Episodes List (2 Columns on Desktop) */}
         <div className="lg:col-span-2 space-y-3">
-          <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
-            Episode Ingestion & Stage Matrix
-          </h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+              Episode Ingestion & Stage Matrix
+            </h3>
+            {episodes.length > 0 && (
+              <span className="text-[10px] font-mono text-zinc-500">
+                Total: {episodes.length} files
+              </span>
+            )}
+          </div>
 
           {episodes.length === 0 ? (
-            <div className="py-12 text-center text-xs text-zinc-500 font-mono italic border border-dashed border-zinc-800 rounded-2xl">
-              No episodes in storage/raw_episodes yet. Use the Quick Action bar or Discovery to download episodes.
+            <div className="space-y-4">
+              <LocalImportDropzone
+                onImportSuccess={async () => {
+                  if (onRefresh) await onRefresh()
+                }}
+                onStartProcessing={async () => {
+                  if (onRefresh) await onRefresh()
+                  if (onRunPipeline) await onRunPipeline()
+                }}
+                onAutoProduce={onAutoProduce}
+              />
             </div>
           ) : (
             <div className="space-y-2">
@@ -161,6 +227,21 @@ export const ProjectWorkspace: React.FC<ProjectWorkspaceProps> = ({ projectData 
                     </div>
 
                     <div className="flex items-center gap-2 text-zinc-400">
+                      {s.rendered && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            openFolderInFileManager({
+                              path: ep.processed_path || `storage/processed_episodes/${ep.stem}_dubbed.mp4`,
+                            })
+                          }}
+                          className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-emerald-400 transition-colors"
+                          title="Open dubbed video in Windows File Explorer"
+                        >
+                          <FolderOpen className="w-4 h-4" />
+                        </button>
+                      )}
                       <Eye className="w-4 h-4 hover:text-indigo-400" />
                       <ChevronRight className="w-4 h-4" />
                     </div>
@@ -197,6 +278,43 @@ export const ProjectWorkspace: React.FC<ProjectWorkspaceProps> = ({ projectData 
                     {episodeDetails?.recap_script?.length || 0} Scene Cues
                   </span>
                 </div>
+
+                {/* Dubbed Video Preview (if rendered) */}
+                {(() => {
+                  const selEp = episodes.find((e) => e.stem === selectedStem)
+                  if (!selEp?.status.rendered) return null
+                  const streamUrl = `/api/video/stream/processed/${encodeURIComponent(selEp.stem)}_dubbed.mp4`
+
+                  return (
+                    <div className="rounded-xl overflow-hidden bg-black/90 border border-indigo-500/30 space-y-1">
+                      <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-950/80 border-b border-zinc-800/80 text-[11px] font-mono text-indigo-300">
+                        <span className="flex items-center gap-1.5 font-semibold">
+                          <Play className="w-3 h-3 text-emerald-400 fill-emerald-400" />
+                          Dubbed Video Player
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            openFolderInFileManager({
+                              path: selEp.processed_path || `storage/processed_episodes/${selEp.stem}_dubbed.mp4`,
+                            })
+                          }
+                          className="hover:text-emerald-400 flex items-center gap-1 text-[10px] text-zinc-400 transition-colors"
+                          title="Open in Windows Explorer"
+                        >
+                          <FolderOpen className="w-3 h-3" />
+                          <span>Reveal File</span>
+                        </button>
+                      </div>
+                      <video
+                        controls
+                        src={streamUrl}
+                        className="w-full max-h-64 object-contain bg-black rounded-b-xl"
+                        preload="metadata"
+                      />
+                    </div>
+                  )
+                })()}
 
                 {/* Script Segments List */}
                 <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
@@ -240,6 +358,36 @@ export const ProjectWorkspace: React.FC<ProjectWorkspaceProps> = ({ projectData 
           </div>
         </div>
       </div>
+
+      {/* Local Drama Import Modal */}
+      {showImportModal &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+            onClick={() => setShowImportModal(false)}
+          >
+            <div className="w-full max-w-4xl" onClick={(e) => e.stopPropagation()}>
+              <LocalImportDropzone
+                isModal
+                onClose={() => setShowImportModal(false)}
+                onImportSuccess={async () => {
+                  if (onRefresh) await onRefresh()
+                  setShowImportModal(false)
+                }}
+                onStartProcessing={async () => {
+                  setShowImportModal(false)
+                  if (onRefresh) await onRefresh()
+                  if (onRunPipeline) await onRunPipeline()
+                }}
+                onAutoProduce={async (opts) => {
+                  setShowImportModal(false)
+                  if (onAutoProduce) await onAutoProduce(opts)
+                }}
+              />
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   )
 }

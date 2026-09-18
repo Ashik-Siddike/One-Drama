@@ -4,6 +4,8 @@ export interface GpuStats {
   vram_used_gb: number;
   vram_total_gb: number;
   vram_percent: number;
+  util_percent?: number;
+  temperature_c?: number;
   device_count: number;
   error?: string;
 }
@@ -48,6 +50,15 @@ export interface Episode {
   raw_size_mb: number;
   status: EpisodeStatus;
   segment_count: number;
+  raw_path?: string;
+  processed_path?: string | null;
+}
+
+export interface OpenFolderResult {
+  status: string;
+  message: string;
+  path: string;
+  is_file: boolean;
 }
 
 export interface MasterMovie {
@@ -87,5 +98,35 @@ export interface Recommendation {
   author?: string;
   safe: boolean;
   safety_flags?: string[];
-  reason?: string;
+  risk_reason?: string;
+}
+
+export interface ScannedVideoItem {
+  original_filename: string;
+  full_path: string;
+  size_mb: number;
+  detected_ep_index: number;
+  proposed_filename: string;
+}
+
+export interface LocalScanResult {
+  valid: boolean;
+  path: string;
+  is_directory: boolean;
+  total_videos: number;
+  total_size_mb: number;
+  videos: ScannedVideoItem[];
+  message: string;
+}
+
+export interface ImportLocalResult {
+  status: string;
+  imported_count: number;
+  episodes: Array<{
+    filename: string;
+    original_filename: string;
+    size_mb: number;
+    path: string;
+  }>;
+  message: string;
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Clock,
   Play,
@@ -18,10 +18,19 @@ import {
   AlertCircle,
   RotateCcw,
 } from 'lucide-react'
+import { fetchProjects } from '../../services/api'
+import type { Episode } from '../../types'
 
 export const TimelineView: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState(false)
   const [activeSubTab, setActiveSubTab] = useState<'timeline' | 'trimmer' | 'lipsync'>('timeline')
+  const [episodes, setEpisodes] = useState<Episode[]>([])
+
+  useEffect(() => {
+    fetchProjects()
+      .then((data) => setEpisodes(data.episodes || []))
+      .catch((err) => console.error('Failed to load project episodes for timeline:', err))
+  }, [])
 
   // Smart Filler Trimmer State
   const [cushionSec, setCushionSec] = useState(0.40)
@@ -151,27 +160,40 @@ export const TimelineView: React.FC = () => {
               <span>02:30</span>
             </div>
 
-            {/* Track 1: Video (with trimmed gap indicators) */}
+            {/* Track 1: Video (with real imported episodes) */}
             <div className="flex items-center gap-3">
               <div className="w-28 shrink-0 font-mono text-[11px] text-zinc-400 font-semibold">
                 V1 (Video + Trim)
               </div>
-              <div className="flex-1 h-12 bg-indigo-950/40 border border-indigo-500/30 rounded-lg relative overflow-hidden flex items-center px-2 gap-1">
-                <div className="h-9 px-3 bg-indigo-600/30 border border-indigo-500/50 rounded flex items-center text-[10px] font-mono text-indigo-200">
-                  Ep 01 [Combat Protected]
-                </div>
-                <div className="h-9 px-2 bg-amber-500/20 border border-dashed border-amber-500/40 rounded flex items-center text-[9px] font-mono text-amber-300">
-                  ✂ Cut 3.2s Filler
-                </div>
-                <div className="h-9 px-3 bg-indigo-600/30 border border-indigo-500/50 rounded flex items-center text-[10px] font-mono text-indigo-200">
-                  Ep 01 Part 2 [Dialogue Cushion: 0.4s]
-                </div>
-                <div className="h-9 px-2 bg-amber-500/20 border border-dashed border-amber-500/40 rounded flex items-center text-[9px] font-mono text-amber-300">
-                  ✂ Cut 1.8s
-                </div>
-                <div className="flex-1 h-9 px-3 bg-indigo-600/30 border border-indigo-500/50 rounded flex items-center text-[10px] font-mono text-indigo-200 truncate">
-                  Ep 01 Climax [1280x720 30fps Lanczos]
-                </div>
+              <div className="flex-1 h-12 bg-indigo-950/40 border border-indigo-500/30 rounded-lg relative overflow-hidden flex items-center px-2 gap-1.5 overflow-x-auto">
+                {episodes.length > 0 ? (
+                  episodes.map((ep, idx) => (
+                    <div
+                      key={ep.stem || idx}
+                      className="h-9 px-3 bg-indigo-600/30 border border-indigo-500/50 rounded flex items-center gap-2 text-[10px] font-mono text-indigo-200 shrink-0"
+                    >
+                      <span className="font-semibold text-zinc-100">{ep.stem}</span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono ${
+                        ep.status?.rendered
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                          : ep.status?.separated
+                          ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                          : 'bg-zinc-800 text-zinc-400'
+                      }`}>
+                        {ep.status?.rendered ? 'Dubbed' : ep.status?.separated ? 'Separated' : 'Raw'}
+                      </span>
+                      {ep.segment_count > 0 && (
+                        <span className="text-[9px] text-zinc-400 font-mono">
+                          {ep.segment_count} cues
+                        </span>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <div className="flex-1 h-9 px-3 bg-indigo-600/20 border border-indigo-500/40 rounded flex items-center text-[10px] font-mono text-indigo-300">
+                    No episodes imported yet - drop video files into Workspace to populate tracks
+                  </div>
+                )}
               </div>
             </div>
 

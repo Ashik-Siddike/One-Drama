@@ -1,7 +1,21 @@
 import { useState } from 'react'
-import { Film, CheckCircle2, Video, Sparkles, Play, Cloud, Check, Loader2, Clapperboard, Scissors } from 'lucide-react'
+import {
+  Film,
+  CheckCircle2,
+  Video,
+  Sparkles,
+  Play,
+  Cloud,
+  Check,
+  Loader2,
+  Clapperboard,
+  Scissors,
+  FolderOpen,
+  Folder,
+  ExternalLink,
+} from 'lucide-react'
 import type { ProjectData } from '../../types'
-import { syncToGoogleDrive, generateShort } from '../../services/api'
+import { syncToGoogleDrive, generateShort, openFolderInFileManager } from '../../services/api'
 
 interface MasterMoviesTableProps {
   projectData: ProjectData | null
@@ -18,6 +32,18 @@ export const MasterMoviesTable: React.FC<MasterMoviesTableProps> = ({ projectDat
 
   const [isGeneratingShort, setIsGeneratingShort] = useState(false)
   const [shortResult, setShortResult] = useState<any | null>(null)
+  const [folderNotice, setFolderNotice] = useState<string | null>(null)
+
+  const handleOpenLocation = async (opts: { category?: string; path?: string; select_file?: string }) => {
+    try {
+      const res = await openFolderInFileManager(opts)
+      setFolderNotice(res.message || 'Opened in File Manager')
+      setTimeout(() => setFolderNotice(null), 3500)
+    } catch (err: any) {
+      setSyncError(err.message || 'Failed to open file manager')
+      setTimeout(() => setSyncError(null), 4000)
+    }
+  }
 
   const handleSync = async () => {
     setIsSyncing(true)
@@ -53,9 +79,65 @@ export const MasterMoviesTable: React.FC<MasterMoviesTableProps> = ({ projectDat
           <Film className="w-4 h-4 text-emerald-400" />
           <h3 className="text-sm font-bold text-zinc-100">Exported Master Movies & Google Drive Sync</h3>
         </div>
-        <span className="text-xs font-mono text-zinc-400">
-          {masterMovies.length} Master Movie(s) Available
+        <div className="flex items-center gap-2">
+          {folderNotice && (
+            <span className="text-xs font-mono px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 animate-fade-in flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              {folderNotice}
+            </span>
+          )}
+          <span className="text-xs font-mono text-zinc-400">
+            {masterMovies.length} Master Movie(s) Available
+          </span>
+        </div>
+      </div>
+
+      {/* 1-Click Fast Storage Navigation Toolbar */}
+      <div className="flex items-center gap-2 flex-wrap mb-4 p-2.5 rounded-xl bg-black/40 border border-zinc-800/70 text-xs">
+        <span className="text-[11px] font-mono text-zinc-400 font-semibold uppercase tracking-wider mr-1 flex items-center gap-1">
+          <Folder className="w-3.5 h-3.5 text-indigo-400" /> 1-Click File Explorer:
         </span>
+        <button
+          type="button"
+          onClick={() => handleOpenLocation({ category: 'master' })}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-700/60 hover:border-zinc-500 text-[11px] font-mono transition-all"
+          title="Open storage/master_export in Windows File Explorer"
+        >
+          <span>🎬 Master Export</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => handleOpenLocation({ category: 'processed' })}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-700/60 hover:border-zinc-500 text-[11px] font-mono transition-all"
+          title="Open storage/processed_episodes in Windows File Explorer"
+        >
+          <span>📺 Dubbed Episodes</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => handleOpenLocation({ category: 'shorts' })}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-700/60 hover:border-zinc-500 text-[11px] font-mono transition-all"
+          title="Open storage/master_export/shorts in Windows File Explorer"
+        >
+          <span>📱 Shorts Folder</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => handleOpenLocation({ category: 'raw' })}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-700/60 hover:border-zinc-500 text-[11px] font-mono transition-all"
+          title="Open storage/raw_episodes in Windows File Explorer"
+        >
+          <span>📥 Raw Episodes</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => handleOpenLocation({ category: 'drive' })}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-700/60 hover:border-zinc-500 text-[11px] font-mono transition-all"
+          title="Open Google Drive Synced Folder in Windows File Explorer"
+        >
+          <Cloud className="w-3 h-3 text-cyan-400" />
+          <span>Google Drive</span>
+        </button>
       </div>
 
       {masterMovies.length === 0 ? (
@@ -94,6 +176,16 @@ export const MasterMoviesTable: React.FC<MasterMoviesTableProps> = ({ projectDat
                 )}
 
                 <button
+                  type="button"
+                  onClick={() => handleOpenLocation({ path: movie.path })}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white text-xs font-semibold font-mono tracking-wide transition-all border border-zinc-700 shadow-sm"
+                  title="Open this movie file directly highlighted in Windows File Explorer"
+                >
+                  <FolderOpen className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>📂 লোকেশন খুলুন</span>
+                </button>
+
+                <button
                   onClick={() => handleGenerateShort(movie.path)}
                   disabled={isGeneratingShort}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-zinc-800 text-white text-xs font-semibold font-mono tracking-wide transition-all shadow-md shadow-amber-600/20"
@@ -126,14 +218,25 @@ export const MasterMoviesTable: React.FC<MasterMoviesTableProps> = ({ projectDat
 
           {/* Short Generation Feedback */}
           {shortResult && (
-            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs font-mono text-amber-300 flex items-center justify-between gap-2">
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs font-mono text-amber-300 flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 shrink-0 text-amber-400" />
                 <span>
                   Viral 9:16 Short Ready: <strong>{shortResult.filename}</strong> ({shortResult.size_mb} MB)
                 </span>
               </div>
-              <span className="text-[11px] text-zinc-400">Ready in storage/master_export/shorts/</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleOpenLocation({ path: shortResult.short_path })}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/30 text-xs font-mono transition-all"
+                  title="Open this short in Windows File Explorer"
+                >
+                  <FolderOpen className="w-3.5 h-3.5 text-amber-300" />
+                  <span>📂 শর্ট ফাইলটি ওপেন করুন</span>
+                </button>
+                <span className="text-[11px] text-zinc-400">Ready in storage/master_export/shorts/</span>
+              </div>
             </div>
           )}
 

@@ -89,6 +89,24 @@ export const ActivePipelineCard: React.FC<ActivePipelineCardProps> = ({ status }
         )}
       </div>
 
+      {/* Live Percentage Progress Bar */}
+      {isRunning && (
+        <div className="py-2 space-y-1.5 border-b border-zinc-800/80 pb-3">
+          <div className="flex items-center justify-between text-xs font-mono">
+            <span className="text-zinc-400">লাইভ প্রোগ্রেস ও নেটওয়ার্ক স্পিড:</span>
+            <span className="font-bold text-amber-400">
+              {status?.progress_percent ? status.progress_percent.toFixed(1) : '5.0'}%
+            </span>
+          </div>
+          <div className="w-full h-2.5 bg-black/60 rounded-full overflow-hidden border border-zinc-800 p-0.5 shadow-inner">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-amber-500 via-orange-500 to-indigo-500 transition-all duration-500 shadow-md shadow-amber-500/20"
+              style={{ width: `${Math.max(4, Math.min(100, status?.progress_percent || 0))}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* 7-Stage Visual Pipeline Stepper */}
       <div className="py-4 overflow-x-auto">
         <div className="flex items-center justify-between min-w-[700px] gap-2">

@@ -181,10 +181,10 @@
       "title": "ep_001.mp4",
       "url": "https://www.bilibili.com/video/ep_001",
       "status": "completed",
-      "recorded_at": "2026-09-05 16:47:13",
+      "recorded_at": "2026-09-18 03:24:23",
       "metadata": {
         "stem": "ep_001",
-        "clips": 3
+        "clips": 32
       }
     },
     "ep_002": {
@@ -192,10 +192,164 @@
       "title": "ep_002.mp4",
       "url": "https://www.bilibili.com/video/ep_002",
       "status": "completed",
-      "recorded_at": "2026-09-05 16:47:13",
+      "recorded_at": "2026-09-18 03:24:23",
       "metadata": {
         "stem": "ep_002",
-        "clips": 3
+        "clips": 59
+      }
+    },
+    "ep_003": {
+      "series_id": "ep_003",
+      "title": "ep_003.mp4",
+      "url": "https://www.bilibili.com/video/ep_003",
+      "status": "completed",
+      "recorded_at": "2026-09-18 03:24:23",
+      "metadata": {
+        "stem": "ep_003",
+        "clips": 29
+      }
+    },
+    "1": {
+      "series_id": "1",
+      "title": "1.mp4",
+      "url": "https://www.bilibili.com/video/1",
+      "status": "completed",
+      "recorded_at": "2026-09-17 20:18:05",
+      "metadata": {
+        "stem": "1",
+        "clips": 33
+      }
+    },
+    "ep_004": {
+      "series_id": "ep_004",
+      "title": "ep_004.mp4",
+      "url": "https://www.bilibili.com/video/ep_004",
+      "status": "completed",
+      "recorded_at": "2026-09-18 03:24:23",
+      "metadata": {
+        "stem": "ep_004",
+        "clips": 45
+      }
+    },
+    "ep_005": {
+      "series_id": "ep_005",
+      "title": "ep_005.mp4",
+      "url": "https://www.bilibili.com/video/ep_005",
+      "status": "completed",
+      "recorded_at": "2026-09-18 03:24:23",
+      "metadata": {
+        "stem": "ep_005",
+        "clips": 48
+      }
+    },
+    "ep_006": {
+      "series_id": "ep_006",
+      "title": "ep_006.mp4",
+      "url": "https://www.bilibili.com/video/ep_006",
+      "status": "completed",
+      "recorded_at": "2026-09-18 03:24:23",
+      "metadata": {
+        "stem": "ep_006",
+        "clips": 48
+      }
+    },
+    "ep_007": {
+      "series_id": "ep_007",
+      "title": "ep_007.mp4",
+      "url": "https://www.bilibili.com/video/ep_007",
+      "status": "completed",
+      "recorded_at": "2026-09-18 03:24:23",
+      "metadata": {
+        "stem": "ep_007",
+        "clips": 39
+      }
+    },
+    "ep_008": {
+      "series_id": "ep_008",
+      "title": "ep_008.mp4",
+      "url": "https://www.bilibili.com/video/ep_008",
+      "status": "completed",
+      "recorded_at": "2026-09-18 03:24:23",
+      "metadata": {
+        "stem": "ep_008",
+        "clips": 34
+      }
+    },
+    "ep_009": {
+      "series_id": "ep_009",
+      "title": "ep_009.mp4",
+      "url": "https://www.bilibili.com/video/ep_009",
+      "status": "completed",
+      "recorded_at": "2026-09-18 03:24:23",
+      "metadata": {
+        "stem": "ep_009",
+        "clips": 24
+      }
+    },
+    "ep_010": {
+      "series_id": "ep_010",
+      "title": "ep_010.mp4",
+      "url": "https://www.bilibili.com/video/ep_010",
+      "status": "completed",
+      "recorded_at": "2026-09-18 03:24:23",
+      "metadata": {
+        "stem": "ep_010",
+        "clips": 28
+      }
+    },
+    "ep_011": {
+      "series_id": "ep_011",
+      "title": "ep_011.mp4",
+      "url": "https://www.bilibili.com/video/ep_011",
+      "status": "completed",
+      "recorded_at": "2026-09-18 03:24:23",
+      "metadata": {
+        "stem": "ep_011",
+        "clips": 34
+      }
+    },
+    "ep_012": {
+      "series_id": "ep_012",
+      "title": "ep_012.mp4",
+      "url": "https://www.bilibili.com/video/ep_012",
+      "status": "completed",
+      "recorded_at": "2026-09-18 03:24:23",
+      "metadata": {
+        "stem": "ep_012",
+        "clips": 28
+      }
+    },
+    "ep_013": {
+      "series_id": "ep_013",
+      "title": "ep_013.mp4",
+      "url": "https://www.bilibili.com/video/ep_013",
+      "status": "completed",
+      "recorded_at": "2026-09-18 03:24:23",
+      "metadata": {
+        "stem": "ep_013",
+        "clips": 35
+      }
+    },
+    "ep_014": {
+      "series_id": "ep_014",
+      "title": "ep_014.mp4",
+      "url": "https://www.bilibili.com/video/ep_014",
+      "status": "completed",
+      "recorded_at": "2026-09-18 03:24:23",
+      "metadata": {
+        "stem": "ep_014",
+        "clips": 40
+      }
+    },
+    "ep_015": {
+      "series_id": "ep_015",
+      "title": "ep_015.mp4",
+      "url": "https://www.bilibili.com/video/ep_015",
+      "status": "completed",
+      "recorded_at": "2026-09-18 03:24:23",
+      "metadata": {
+        "stem": "ep_015",
+        "clips": 37
       }
     }
   }

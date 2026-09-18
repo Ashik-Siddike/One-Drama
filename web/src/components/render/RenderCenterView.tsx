@@ -13,12 +13,18 @@ import {
   Layers,
   Loader2,
   DownloadCloud,
+  Clock,
+  AlertCircle,
+  Info,
+  Sparkle,
+  FolderOpen,
 } from 'lucide-react'
-import type { PipelineStatus } from '../../types'
-import { generateShort } from '../../services/api'
+import type { PipelineStatus, ProjectData } from '../../types'
+import { generateShort, openFolderInFileManager } from '../../services/api'
 
 interface RenderCenterViewProps {
   pipelineStatus: PipelineStatus | null
+  projectData?: ProjectData | null
   onStartRender: (opts?: {
     enable_filler_trim?: boolean
     generate_shorts?: boolean
@@ -28,6 +34,7 @@ interface RenderCenterViewProps {
 
 export const RenderCenterView: React.FC<RenderCenterViewProps> = ({
   pipelineStatus,
+  projectData,
   onStartRender,
 }) => {
   const [resolution, setResolution] = useState('1080p')
@@ -36,7 +43,7 @@ export const RenderCenterView: React.FC<RenderCenterViewProps> = ({
   const [isStarting, setIsStarting] = useState(false)
 
   // Master Pipeline Feature Toggles
-  const [enableFillerTrim, setEnableFillerTrim] = useState(true)
+  const [enableFillerTrim, setEnableFillerTrim] = useState(false)
   const [generateShortsOnRender, setGenerateShortsOnRender] = useState(true)
   const [splitCompilations, setSplitCompilations] = useState(false)
 
@@ -49,6 +56,19 @@ export const RenderCenterView: React.FC<RenderCenterViewProps> = ({
   const [shortError, setShortError] = useState<string | null>(null)
 
   const isRunning = pipelineStatus?.is_running
+
+  const totalEpisodes = projectData?.total_raw_episodes ?? (projectData?.episodes?.length || 0)
+  const estTotalMins = Math.round(totalEpisodes * 3.5)
+  const isFullMovieReady = totalEpisodes >= 20
+  const isSingleOrSmall = totalEpisodes < 10
+
+  const formatEstDuration = (mins: number) => {
+    if (mins <= 0) return '0 mins'
+    if (mins < 60) return `~${mins} mins`
+    const h = Math.floor(mins / 60)
+    const m = mins % 60
+    return `~${h}h ${m > 0 ? `${m}m` : ''}`
+  }
 
   const handleRenderClick = async () => {
     setIsStarting(true)
@@ -102,27 +122,102 @@ export const RenderCenterView: React.FC<RenderCenterViewProps> = ({
           </div>
         </div>
 
-        <button
-          onClick={handleRenderClick}
-          disabled={isRunning || isStarting}
-          className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold tracking-wide transition-all shadow-xl ${
-            isRunning
-              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 cursor-not-allowed'
-              : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/20 hover:shadow-emerald-600/30'
-          }`}
-        >
-          {isRunning ? (
-            <>
-              <Radio className="w-4 h-4 animate-spin text-amber-400" />
-              <span>Rendering in Progress...</span>
-            </>
-          ) : (
-            <>
-              <Play className="w-4 h-4 fill-current" />
-              <span>START MASTER RENDER</span>
-            </>
-          )}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => openFolderInFileManager({ category: 'master' })}
+            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold font-mono transition-all border border-zinc-700 shadow-sm"
+            title="Open storage/master_export in Windows File Explorer"
+          >
+            <FolderOpen className="w-4 h-4 text-emerald-400" />
+            <span>📂 মাস্টার এক্সপোর্ট ফোল্ডার</span>
+          </button>
+
+          <button
+            onClick={handleRenderClick}
+            disabled={isRunning || isStarting}
+            className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold tracking-wide transition-all shadow-xl ${
+              isRunning
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 cursor-not-allowed'
+                : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/20 hover:shadow-emerald-600/30'
+            }`}
+          >
+            {isRunning ? (
+              <>
+                <Radio className="w-4 h-4 animate-spin text-amber-400" />
+                <span>Rendering in Progress...</span>
+              </>
+            ) : (
+              <>
+                <Play className="w-4 h-4 fill-current" />
+                <span>START MASTER RENDER</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Season Duration & Ingest Calculator Banner */}
+      <div className="p-4 rounded-2xl bg-zinc-900/50 border border-zinc-800/80 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+              <Clock className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-zinc-200">Current Season Queue:</span>
+                <span className="text-xs font-mono font-bold text-indigo-400">
+                  {totalEpisodes} Episode{totalEpisodes === 1 ? '' : 's'}
+                </span>
+                <span className="text-zinc-600">•</span>
+                <span className="text-xs font-mono text-amber-400">
+                  Estimated Movie Runtime: {formatEstDuration(estTotalMins)}
+                </span>
+              </div>
+              <p className="text-[11px] text-zinc-400 mt-0.5">
+                Target for a complete 1 to 2 Hour YouTube Full Movie: <strong className="text-zinc-300">20–35 Episodes</strong>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span
+              className={`text-[10px] font-mono px-2.5 py-1 rounded-full border ${
+                isFullMovieReady
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                  : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+              }`}
+            >
+              {isFullMovieReady ? '✓ FULL MOVIE READY' : 'PREVIEW / SHORT RUNTIME'}
+            </span>
+          </div>
+        </div>
+
+        {/* Progress gauge toward 1-2 hr full season */}
+        <div className="space-y-1">
+          <div className="flex items-center justify-between text-[10px] font-mono text-zinc-500">
+            <span>Queue Progress ({totalEpisodes}/25 eps)</span>
+            <span>{Math.min(100, Math.round((totalEpisodes / 25) * 100))}% toward Full Season Movie</span>
+          </div>
+          <div className="w-full h-1.5 rounded-full bg-zinc-800/80 overflow-hidden">
+            <div
+              className={`h-full transition-all duration-500 rounded-full ${
+                isFullMovieReady ? 'bg-emerald-500' : 'bg-gradient-to-r from-amber-500 to-indigo-500'
+              }`}
+              style={{ width: `${Math.min(100, Math.max(5, (totalEpisodes / 25) * 100))}%` }}
+            />
+          </div>
+        </div>
+
+        {isSingleOrSmall && (
+          <div className="flex items-start gap-2 p-2.5 rounded-xl bg-amber-500/5 border border-amber-500/20 text-[11px] text-amber-300/90 leading-relaxed">
+            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <strong>Notice:</strong> Currently only <strong>{totalEpisodes} episode(s)</strong> are in the raw queue, which will produce a short <strong>{formatEstDuration(estTotalMins)}</strong> master clip. For a complete uninterrupted 1–2 hour movie series, go to the <strong>Discovery Radar</strong> or paste an entire season playlist link (20–30 episodes) in the Dashboard!
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Pipeline Feature Toggles Bar */}
@@ -139,7 +234,7 @@ export const RenderCenterView: React.FC<RenderCenterViewProps> = ({
               <Scissors className="w-3.5 h-3.5 text-amber-400" />
               Smart Filler Trimming
             </div>
-            <p className="text-[11px] text-zinc-400">0.4s cushioned speech pauses</p>
+            <p className="text-[11px] text-zinc-400">Disabled (keeps full video uncut)</p>
           </div>
         </label>
 
@@ -403,6 +498,25 @@ export const RenderCenterView: React.FC<RenderCenterViewProps> = ({
                 </div>
                 <div className="text-[10px] text-zinc-500 truncate">
                   Saved to: {shortResult.short_path}
+                </div>
+                <div className="pt-2 flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => openFolderInFileManager({ path: shortResult.short_path })}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-200 border border-emerald-500/40 text-xs font-mono transition-all"
+                    title="Open this short file highlighted in Windows File Explorer"
+                  >
+                    <FolderOpen className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>📂 শর্ট ফাইলটি খুলুন</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openFolderInFileManager({ category: 'shorts' })}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 text-xs font-mono transition-all"
+                    title="Open storage/master_export/shorts in Windows File Explorer"
+                  >
+                    <span>📱 Shorts ফোল্ডার</span>
+                  </button>
                 </div>
               </div>
             )}

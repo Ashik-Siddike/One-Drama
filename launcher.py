@@ -16,6 +16,13 @@ import time
 import urllib.request
 import webbrowser
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 ENGINE_DIR = os.path.join(ROOT_DIR, "one_drama_engine")
 WEB_DIR = os.path.join(ROOT_DIR, "web")
@@ -36,9 +43,13 @@ BANNER = r"""
 
 
 def is_port_in_use(port: int) -> bool:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.settimeout(0.5)
-        return s.connect_ex(("127.0.0.1", port)) == 0
+    for host in ("127.0.0.1", "localhost"):
+        try:
+            with socket.create_connection((host, port), timeout=0.5):
+                return True
+        except Exception:
+            pass
+    return False
 
 
 def check_backend_healthy() -> bool:

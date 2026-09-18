@@ -127,9 +127,136 @@ def _mk_silent_wav(path: str, duration: float) -> str:
     return path
 
 
+def _resolve_demucs_device(device: str | None = None) -> str:
+    """Resolve compute device for Demucs, auto-detecting NVIDIA CUDA."""
+    if device and device.strip():
+        return device.strip()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return "cuda"
+    except Exception:
+        pass
+    return "cpu"
+
+
+def _run_demucs_chunked(
+    source_wav: str,
+    vocals_final: str,
+    no_vocals_final: str,
+    temp_dir: str,
+    *,
+    model: str = DEMUCS_MODEL,
+    device: str | None = None,
+    jobs: int = 1,
+    shifts: int = 0,
+    chunk_sec: int = 120,
+    extra_args: Sequence[str] | None = None,
+) -> None:
+    """Safely separate long audio by slicing into 2-minute chunks to prevent PyTorch OOM."""
+    device = _resolve_demucs_device(device)
+    log.info("Demucs chunked separation running on hardware device: %s", device.upper())
+    ffmpeg = require_binary("ffmpeg")
+    chunks_dir = ensure_dir(os.path.join(temp_dir, "chunks"))
+    chunk_pattern = os.path.join(chunks_dir, "chunk_%04d.wav")
+
+    run_command(
+        [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            source_wav,
+            "-f",
+            "segment",
+            "-segment_time",
+            str(chunk_sec),
+            "-c",
+            "copy",
+            chunk_pattern,
+        ],
+        desc="ffmpeg(chunk-split)",
+    )
+    chunk_files = sorted(
+        [os.path.join(chunks_dir, f) for f in os.listdir(chunks_dir) if f.endswith(".wav")]
+    )
+    if not chunk_files:
+        raise PipelineError("Failed to chunk long audio for Demucs separation.")
+
+    vocals_chunks: list[str] = []
+    no_vocals_chunks: list[str] = []
+
+    for i, cpath in enumerate(chunk_files):
+        c_demucs_out = ensure_dir(os.path.join(temp_dir, f"out_{i:04d}"))
+        argv = _demucs_command() + [
+            "--two-stems=vocals",
+            "-n",
+            model,
+            "-o",
+            c_demucs_out,
+            "--filename",
+            "{stem}.{ext}",
+            "-j",
+            str(max(1, int(jobs))),
+        ]
+        if shifts and int(shifts) > 0:
+            argv += ["--shifts", str(int(shifts))]
+        if device:
+            argv += ["-d", device]
+        if extra_args:
+            argv += [str(a) for a in extra_args]
+        argv.append(cpath)
+
+        run_command(argv, desc=f"demucs(chunk-{i+1}/{len(chunk_files)})", capture=True, check=True)
+        v_stem, nv_stem = _locate_stems(c_demucs_out)
+        if not v_stem:
+            raise PipelineError(f"Demucs failed on chunk {i+1}")
+        v_dest = os.path.join(temp_dir, f"vocals_{i:04d}.wav")
+        nv_dest = os.path.join(temp_dir, f"no_vocals_{i:04d}.wav")
+        shutil.move(v_stem, v_dest)
+        vocals_chunks.append(v_dest)
+        if nv_stem and os.path.isfile(nv_stem):
+            shutil.move(nv_stem, nv_dest)
+            no_vocals_chunks.append(nv_dest)
+        else:
+            _mk_silent_wav(nv_dest, ffprobe_duration(cpath))
+            no_vocals_chunks.append(nv_dest)
+
+    def _concat_wavs(wav_list: list[str], dest_wav: str) -> None:
+        list_file = os.path.join(temp_dir, f"concat_{os.path.basename(dest_wav)}.txt")
+        with open(list_file, "w", encoding="utf-8") as f:
+            for w in wav_list:
+                f.write(f"file '{w.replace(chr(92), '/')}'\n")
+        run_command(
+            [
+                ffmpeg,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                list_file,
+                "-c",
+                "copy",
+                dest_wav,
+            ],
+            desc="ffmpeg(concat-stems)",
+        )
+
+    _concat_wavs(vocals_chunks, vocals_final)
+    _concat_wavs(no_vocals_chunks, no_vocals_final)
+
+
 # --------------------------------------------------------------------------- #
 # Public API
 # --------------------------------------------------------------------------- #
+
 def split_audio(
     video_path: str,
     output_base_dir: str,
@@ -181,46 +308,71 @@ def split_audio(
         log.info("[%s] audio length %.1fs", stem, source_duration)
 
         ensure_dir(demucs_out)
-        argv = _demucs_command() + [
-            "--two-stems=vocals",
-            "-n",
-            model,
-            "-o",
-            demucs_out,
-            "--filename",
-            "{stem}.{ext}",
-            "-j",
-            str(max(1, int(jobs))),
-        ]
-        if shifts and int(shifts) > 0:
-            argv += ["--shifts", str(int(shifts))]
-        if device:
-            argv += ["-d", device]
-        if extra_args:
-            argv += [str(a) for a in extra_args]
-        argv.append(source_wav)
 
-        log.info("[%s] running Demucs (%s, two-stem)... this is the slow step.", stem, model)
-        os.environ.pop("PYTHONHASHSEED", None)
-        run_command(argv, desc="demucs", capture=False, check=True)
+        device = _resolve_demucs_device(device)
 
-        vocals_src, no_vocals_src = _locate_stems(demucs_out)
-        if not vocals_src:
-            raise PipelineError(
-                f"Demucs finished but no vocals stem was found under {demucs_out}"
-            )
-
-        shutil.move(vocals_src, vocals_final)
-
-        if no_vocals_src and os.path.isfile(no_vocals_src):
-            shutil.move(no_vocals_src, no_vocals_final)
-        else:
+        # Episodic Short-Video Guard: Standard short episodes (1.5-3.5m, <300s) run directly.
+        # If any clip exceeds 300s, slice into 120s chunks to avoid PyTorch CPU allocator OOM (8.9GB crash).
+        if source_duration > 300.0:
             log.warning(
-                "[%s] no instrumental stem produced; substituting silence so the "
-                "render stage still has a bed to mix.",
+                "[%s] Audio duration (%.1fs) exceeds safe short-drama threshold (300s). "
+                "Activating Demucs Sliding Chunk Protector (2-min chunks) to guarantee memory safety...",
                 stem,
+                source_duration,
             )
-            _mk_silent_wav(no_vocals_final, source_duration or 1.0)
+            _run_demucs_chunked(
+                source_wav,
+                vocals_final,
+                no_vocals_final,
+                demucs_out,
+                model=model,
+                device=device,
+                jobs=jobs,
+                shifts=shifts,
+                chunk_sec=120,
+                extra_args=extra_args,
+            )
+        else:
+            argv = _demucs_command() + [
+                "--two-stems=vocals",
+                "-n",
+                model,
+                "-o",
+                demucs_out,
+                "--filename",
+                "{stem}.{ext}",
+                "-j",
+                str(max(1, int(jobs))),
+                "-d",
+                device,
+            ]
+            if shifts and int(shifts) > 0:
+                argv += ["--shifts", str(int(shifts))]
+            if extra_args:
+                argv += [str(a) for a in extra_args]
+            argv.append(source_wav)
+
+            log.info("[%s] running Demucs (%s, two-stem) on %s hardware accelerator...", stem, model, device.upper())
+            os.environ.pop("PYTHONHASHSEED", None)
+            run_command(argv, desc="demucs", capture=True, check=True)
+
+            vocals_src, no_vocals_src = _locate_stems(demucs_out)
+            if not vocals_src:
+                raise PipelineError(
+                    f"Demucs finished but no vocals stem was found under {demucs_out}"
+                )
+
+            shutil.move(vocals_src, vocals_final)
+
+            if no_vocals_src and os.path.isfile(no_vocals_src):
+                shutil.move(no_vocals_src, no_vocals_final)
+            else:
+                log.warning(
+                    "[%s] no instrumental stem produced; substituting silence so the "
+                    "render stage still has a bed to mix.",
+                    stem,
+                )
+                _mk_silent_wav(no_vocals_final, source_duration or 1.0)
 
         for label, path in (("vocals", vocals_final), ("no_vocals", no_vocals_final)):
             if not os.path.isfile(path) or os.path.getsize(path) < 1024:

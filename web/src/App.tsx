@@ -17,6 +17,7 @@ import { TimelineView } from './components/timeline/TimelineView'
 import { RenderCenterView } from './components/render/RenderCenterView'
 import { QCAuditView } from './components/qc/QCAuditView'
 import { SettingsView } from './components/settings/SettingsView'
+import { GlobalPipelineProgressBar } from './components/common/GlobalPipelineProgressBar'
 import type { SystemStats, ProjectData, PipelineStatus } from './types'
 import {
   fetchSystemStats,
@@ -24,6 +25,7 @@ import {
   fetchPipelineStatus,
   triggerDownload,
   triggerPipelineRun,
+  triggerAutoProduce,
 } from './services/api'
 
 export function App() {
@@ -59,6 +61,8 @@ export function App() {
     }
   }
 
+  const [autoPilotPendingRender, setAutoPilotPendingRender] = useState(false)
+
   const loadStatusOnly = async () => {
     try {
       const [s, st] = await Promise.all([
@@ -66,7 +70,19 @@ export function App() {
         fetchPipelineStatus().catch(() => null),
       ])
       if (s) setStats(s)
-      if (st) setPipelineStatus(st)
+      if (st) {
+        setPipelineStatus(st)
+        if (autoPilotPendingRender && !st.is_running && st.job_type === 'idle') {
+          setAutoPilotPendingRender(false)
+          triggerPipelineRun({
+            enable_filler_trim: false,
+            generate_shorts: true,
+            carry_context: true,
+          })
+            .then(() => loadAllData())
+            .catch(console.error)
+        }
+      }
     } catch {
       // ignore transient poll errors
     }
@@ -74,6 +90,12 @@ export function App() {
 
   const handleDownload = async (queryOrUrl: string, limit?: number) => {
     await triggerDownload(queryOrUrl, limit)
+    await loadAllData()
+  }
+
+  const handleAutoProduce = async (opts: { query_or_url: string; limit?: number }) => {
+    setAutoPilotPendingRender(true)
+    await triggerAutoProduce(opts)
     await loadAllData()
   }
 
@@ -113,6 +135,9 @@ export function App() {
           isLoading={isLoading}
         />
 
+        {/* Global Live Progress Bar (Always Visible Across All Tabs) */}
+        <GlobalPipelineProgressBar status={pipelineStatus} />
+
         {/* Dynamic Workspace Body */}
         <main className="flex-1 overflow-y-auto p-6 space-y-6">
           {currentTab === 'dashboard' && (
@@ -122,18 +147,31 @@ export function App() {
               <QuickActionCenter
                 onDownload={handleDownload}
                 onRunPipeline={() => handleRunPipeline()}
+                onAutoProduce={handleAutoProduce}
+                onRefresh={loadAllData}
                 isBusy={pipelineStatus?.is_running || false}
+                rawEpisodeCount={projectData?.total_raw_episodes || 0}
               />
               <MasterMoviesTable projectData={projectData} />
             </>
           )}
 
           {currentTab === 'projects' && (
-            <ProjectWorkspace projectData={projectData} />
+            <ProjectWorkspace
+              projectData={projectData}
+              onRefresh={loadAllData}
+              onAutoProduce={handleAutoProduce}
+              onRunPipeline={() => handleRunPipeline()}
+              isBusy={pipelineStatus?.is_running || false}
+            />
           )}
 
           {currentTab === 'discovery' && (
-            <DiscoveryView onIngestSeries={handleDownload} />
+            <DiscoveryView
+              onIngestSeries={handleDownload}
+              onAutoProduce={handleAutoProduce}
+              pipelineStatus={pipelineStatus}
+            />
           )}
 
           {currentTab === 'stories' && <StoryBibleView />}
@@ -153,6 +191,7 @@ export function App() {
           {currentTab === 'render' && (
             <RenderCenterView
               pipelineStatus={pipelineStatus}
+              projectData={projectData}
               onStartRender={handleRunPipeline}
             />
           )}

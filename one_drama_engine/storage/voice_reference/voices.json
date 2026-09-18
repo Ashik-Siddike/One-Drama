@@ -1,13 +1,22 @@
 {
-  "active_voice_id": "narrator_ref_default",
+  "active_voice_id": "ravi_gupta",
   "voices": [
+    {
+      "id": "ravi_gupta",
+      "name": "Ravi Gupta (Casual Hindi Standup / Storyteller)",
+      "filename": "ravi_gupta.wav",
+      "ref_text": "उन्होंने बहुत कम रखा, दो तीन हजार पर बात फसी हुई थी और उनका जो मटेरियल था, वो प्रीमियम नहीं था, सुपारी उनकी मसूले में चुप गई थी मेरे",
+      "duration_sec": 11.28,
+      "is_default": true,
+      "created_at": "2026-09-06 20:03:00"
+    },
     {
       "id": "narrator_ref_default",
       "name": "Default Male Narrator (Xianxia Intensity)",
       "filename": "narrator_ref.wav",
       "ref_text": "इस दुनिया में कमजोर की कोई जगह नहीं है, ताकत ही सब कुछ तय करती है।",
       "duration_sec": 6.67,
-      "is_default": true,
+      "is_default": false,
       "created_at": "2026-09-05 16:43:49"
     }
   ]

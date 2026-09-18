@@ -3,6 +3,8 @@ import type {
   ProjectData,
   PipelineStatus,
   Recommendation,
+  LocalScanResult,
+  ImportLocalResult,
 } from '../types'
 
 const API_BASE = '/api'
@@ -31,6 +33,67 @@ export async function fetchEpisodeDetails(stem: string) {
   return res.json()
 }
 
+export async function scanLocalPath(path: string): Promise<LocalScanResult> {
+  const res = await fetch(`${API_BASE}/projects/scan_local_path`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Failed to scan path' }))
+    throw new Error(err.detail || 'Failed to scan path')
+  }
+  return res.json()
+}
+
+export async function importLocalPath(opts: {
+  path: string
+  archive_previous?: boolean
+  copy_or_move?: 'copy' | 'move'
+  rename_to_standard?: boolean
+  selected_files?: string[]
+}): Promise<ImportLocalResult> {
+  const res = await fetch(`${API_BASE}/projects/import_local_path`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      path: opts.path,
+      archive_previous: opts.archive_previous ?? false,
+      copy_or_move: opts.copy_or_move ?? 'copy',
+      rename_to_standard: opts.rename_to_standard ?? true,
+      selected_files: opts.selected_files,
+    }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Failed to import local path' }))
+    throw new Error(err.detail || 'Failed to import local path')
+  }
+  return res.json()
+}
+
+export async function uploadEpisodeFiles(
+  files: File[],
+  archive_previous = false,
+  rename_to_standard = true
+): Promise<ImportLocalResult> {
+  const formData = new FormData()
+  for (const file of files) {
+    formData.append('files', file)
+  }
+  formData.append('archive_previous', String(archive_previous))
+  formData.append('rename_to_standard', String(rename_to_standard))
+
+  const res = await fetch(`${API_BASE}/projects/upload_episodes`, {
+    method: 'POST',
+    body: formData,
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Failed to upload episodes' }))
+    throw new Error(err.detail || 'Failed to upload episodes')
+  }
+  return res.json()
+}
+
 export async function fetchTrending(
   genre = 'cultivation',
   limit = 6
@@ -53,22 +116,101 @@ export async function searchManhua(
   return res.json()
 }
 
-export async function fetchDaily3DSuggestions(): Promise<{
+export async function fetchDaily3DSuggestions(
+  genre?: string,
+  refresh = false
+): Promise<{
   status: string
   suggestions: Array<{
     id: string
     title: string
-    chinese_title: string
+    bengali_title?: string
+    chinese_title?: string
     query: string
+    url?: string
+    thumbnail?: string
+    genre?: string
     hook: string
+    bengali_hook?: string
     category: string
     target_audience: string
+    episodes_est?: string
     icon: string
   }>
 }> {
-  const res = await fetch(`${API_BASE}/discovery/daily_suggestions`)
+  const params = new URLSearchParams()
+  if (genre && genre !== 'all') params.set('genre', genre)
+  if (refresh) params.set('refresh', 'true')
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  const res = await fetch(`${API_BASE}/discovery/daily_suggestions${qs}`)
   if (!res.ok) throw new Error('Failed to fetch daily 3D suggestions')
   return res.json()
+}
+
+export async function autoScanShortSeries(
+  genre?: string,
+  count = 6
+): Promise<{
+  status: string
+  count: number
+  suggestions: Array<{
+    id: string
+    title: string
+    bengali_title?: string
+    chinese_title?: string
+    query: string
+    url?: string
+    thumbnail?: string
+    genre?: string
+    hook: string
+    bengali_hook?: string
+    category: string
+    target_audience: string
+    episodes_est?: string
+    icon: string
+    is_short_series?: boolean
+  }>
+}> {
+  const params = new URLSearchParams()
+  if (genre && genre !== 'all') params.set('genre', genre)
+  params.set('count', String(count))
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  const res = await fetch(`${API_BASE}/discovery/auto_scan_short_series${qs}`, {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error('Failed to auto-scan short series')
+  return res.json()
+}
+
+
+export async function fetchCustomSeries(): Promise<{ status: string; series: any[] }> {
+  const res = await fetch(`${API_BASE}/discovery/custom_series`)
+  if (!res.ok) throw new Error('Failed to fetch custom series')
+  return res.json()
+}
+
+export async function addCustomSeries(data: {
+  title: string
+  url: string
+  category?: string
+  hook?: string
+  genre?: string
+}) {
+  const res = await fetch(`${API_BASE}/discovery/custom_series`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Failed to add custom series')
+  return res.json()
+}
+
+export function getProxiedImageUrl(url?: string): string {
+  if (!url) return ''
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    return `${API_BASE}/media/image_proxy?url=${encodeURIComponent(url)}`
+  }
+  return url
 }
 
 export async function search3DManhua(
@@ -85,17 +227,82 @@ export async function search3DManhua(
   return res.json()
 }
 
-export async function triggerDownload(query_or_url: string, limit?: number) {
+export async function fetchWorkspaceStatus(): Promise<{
+  has_active_assets: boolean
+  raw_episodes_count: number
+  raw_files: string[]
+  processed_episodes_count: number
+  master_movies_count: number
+}> {
+  const res = await fetch(`${API_BASE}/projects/workspace_status`)
+  if (!res.ok) throw new Error('Failed to fetch workspace status')
+  return res.json()
+}
+
+export async function archiveWorkspace(projectName?: string): Promise<{
+  archived: boolean
+  message: string
+  archive_path: string | null
+  total_files: number
+}> {
+  const url = projectName
+    ? `${API_BASE}/projects/archive?project_name=${encodeURIComponent(projectName)}`
+    : `${API_BASE}/projects/archive`
+  const res = await fetch(url, { method: 'POST' })
+  if (!res.ok) throw new Error('Failed to archive workspace')
+  return res.json()
+}
+
+export async function fetchArchives(): Promise<any[]> {
+  const res = await fetch(`${API_BASE}/projects/archives`)
+  if (!res.ok) throw new Error('Failed to fetch archives')
+  return res.json()
+}
+
+export async function triggerDownload(
+  query_or_url: string,
+  limit?: number,
+  archive_previous = false
+) {
   const res = await fetch(`${API_BASE}/pipeline/download`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query_or_url, limit }),
+    body: JSON.stringify({ query_or_url, limit, archive_previous }),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: 'Download request failed' }))
     throw new Error(err.detail || 'Download request failed')
   }
   return res.json()
+}
+
+export async function triggerAutoProduce(opts: {
+  query_or_url: string
+  limit?: number
+  enable_filler_trim?: boolean
+  generate_shorts?: boolean
+  archive_previous?: boolean
+}) {
+  try {
+    const res = await fetch(`${API_BASE}/pipeline/autopilot`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query_or_url: opts.query_or_url,
+        limit: opts.limit ?? 25,
+        enable_filler_trim: opts.enable_filler_trim ?? false,
+        generate_shorts: opts.generate_shorts ?? true,
+        archive_previous: opts.archive_previous ?? true,
+      }),
+    })
+    if (res.ok) {
+      return await res.json()
+    }
+  } catch {
+    // fallback to download
+  }
+
+  return triggerDownload(opts.query_or_url, opts.limit ?? 25, opts.archive_previous ?? true)
 }
 
 export async function triggerPipelineRun(opts: {
@@ -124,6 +331,14 @@ export async function fetchPipelineStatus(): Promise<PipelineStatus> {
   return res.json()
 }
 
+export async function stopPipeline(): Promise<{ status: string }> {
+  const res = await fetch(`${API_BASE}/pipeline/stop`, {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error('Failed to stop pipeline')
+  return res.json()
+}
+
 // --------------------------------------------------------------------------- //
 // Story Bible & Characters API
 // --------------------------------------------------------------------------- //
@@ -143,20 +358,80 @@ export async function saveStoryBible(bible: any) {
   return res.json()
 }
 
-export async function fetchCharacters() {
+export interface DramaCharacter {
+  id: string
+  role: string
+  name: string
+  hindi_name: string
+  gender: string
+  frame_index: number
+  box_ymin: number
+  box_xmin: number
+  box_ymax: number
+  box_xmax: number
+  visual_summary: string
+}
+
+export interface CharacterRoleConfig {
+  display_name: string
+  gender: string
+  age_group: string
+  f5_ref_audio: string
+  f5_ref_text: string
+  edge_voice: string
+  edge_pitch: string
+  edge_rate: string
+  description: string
+}
+
+export interface CharacterCastResponse {
+  lineup: {
+    drama_title?: string
+    sheet_image?: string
+    characters?: DramaCharacter[]
+    total_characters?: number
+  }
+  registry: {
+    dubbing_mode: string
+    roles: Record<string, CharacterRoleConfig>
+  }
+  has_sheet_image: boolean
+  sheet_image_url: string | null
+}
+
+export async function fetchCharacterCast(): Promise<CharacterCastResponse> {
   const res = await fetch(`${API_BASE}/characters`)
-  if (!res.ok) throw new Error('Failed to fetch characters')
+  if (!res.ok) throw new Error('Failed to fetch character cast')
   return res.json()
 }
 
-export async function saveCharacters(chars: any[]) {
-  const res = await fetch(`${API_BASE}/characters`, {
+export async function saveCharacterRegistry(registry: any): Promise<any> {
+  const res = await fetch(`${API_BASE}/characters/registry`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(chars),
+    body: JSON.stringify(registry),
   })
-  if (!res.ok) throw new Error('Failed to save characters')
+  if (!res.ok) throw new Error('Failed to save character registry')
   return res.json()
+}
+
+export async function triggerCharacterScan(): Promise<any> {
+  const res = await fetch(`${API_BASE}/characters/detect`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Failed to scan characters' }))
+    throw new Error(err.detail || 'Failed to scan characters')
+  }
+  return res.json()
+}
+
+export async function fetchCharacters() {
+  return fetchCharacterCast().then((res) => res.lineup.characters || [])
+}
+
+export async function saveCharacters(chars: any[]) {
+  return Promise.resolve({ status: 'ok' })
 }
 
 // --------------------------------------------------------------------------- //
@@ -472,5 +747,26 @@ export async function trimIntroOutro(
   if (!res.ok) throw new Error('Failed to trim intro/outro')
   return res.json()
 }
+
+// --------------------------------------------------------------------------- //
+// Local File Manager Integration (1-Click Reveal)
+// --------------------------------------------------------------------------- //
+export async function openFolderInFileManager(opts: {
+  category?: 'master' | 'processed' | 'raw' | 'shorts' | 'tts' | 'drive' | 'workspace' | string
+  path?: string
+  select_file?: string
+}): Promise<{ status: string; message: string; path: string; is_file: boolean }> {
+  const res = await fetch(`${API_BASE}/system/open_folder`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(opts),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Failed to open in File Manager' }))
+    throw new Error(err.detail || 'Failed to open in File Manager')
+  }
+  return res.json()
+}
+
 
 

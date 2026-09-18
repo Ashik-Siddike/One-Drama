@@ -181,6 +181,12 @@ def trim_intro_outro(
         return None
 
     if reencode:
+        from modules.video_processor import _has_nvenc_support
+        use_nvenc = _has_nvenc_support()
+        vcodec = "h264_nvenc" if use_nvenc else "libx264"
+        preset = "p4" if use_nvenc else "veryfast"
+        q_flags = ["-cq", "19"] if use_nvenc else ["-crf", "19"]
+
         cmd = [
             ffmpeg,
             "-hide_banner",
@@ -189,9 +195,9 @@ def trim_intro_outro(
             "-ss", f"{clean_start_sec:.2f}",
             "-i", input_video_path,
             "-t", f"{duration:.2f}",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "19",
+            "-c:v", vcodec,
+            "-preset", preset,
+            *q_flags,
             "-c:a", "aac",
             "-b:a", "192k",
             "-avoid_negative_ts", "make_zero",

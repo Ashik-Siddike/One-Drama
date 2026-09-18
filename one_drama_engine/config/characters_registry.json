@@ -1,0 +1,180 @@
+{
+  "dubbing_mode": "multi_character",
+  "roles": {
+    "king": {
+      "display_name": "Emperor / King / Royal Monarch (সম্রাট/রাজা)",
+      "gender": "male",
+      "age_group": "mature",
+      "edge_voice": "hi-IN-MadhurNeural",
+      "edge_pitch": "-18Hz",
+      "edge_rate": "-2%",
+      "description": "Authoritative, majestic, royal male emperor/king on the throne"
+    },
+    "hero": {
+      "display_name": "Hero / Male Lead (नायक)",
+      "gender": "male",
+      "age_group": "young",
+      "f5_ref_audio": "storage/voice_reference/ravi_gupta.wav",
+      "f5_ref_text": "उन्होंने बहुत कम रखा, दो तीन हजार पर बात फसी हुई थी और उनका जो मटेरियल था, वो प्रीमियम नहीं था, सुपारी उनकी मसूले में चुप गई थी मेरे",
+      "f5_emotions": {
+        "calm": {
+          "ref_audio": "storage/voice_reference/ravi_gupta.wav",
+          "ref_text": "उन्होंने बहुत कम रखा, दो तीन हजार पर बात फसी हुई थी और उनका जो मटेरियल था, वो प्रीमियम नहीं था, सुपारी उनकी मसूले में चुप गई थी मेरे"
+        },
+        "angry": {
+          "ref_audio": "storage/voice_reference/hero_angry.wav",
+          "ref_text": "रुक जाओ वहीं! आज कोई भी तुम्हें मेरे गुस्से से नहीं बचा सकता!"
+        }
+      },
+      "edge_voice": "hi-IN-MadhurNeural",
+      "edge_pitch": "+0Hz",
+      "edge_rate": "+0%",
+      "description": "Confident, bold young male protagonist"
+    },
+    "heroine": {
+      "display_name": "Heroine / Female Lead (নায়িকা)",
+      "gender": "female",
+      "age_group": "young",
+      "f5_ref_audio": "storage/voice_reference/heroine_calm.wav",
+      "f5_ref_text": "मैं इस दुनिया की सबसे ताकतवर महारानी बनकर रहूंगी, मुझे कोई नहीं रोक सकता।",
+      "f5_emotions": {
+        "calm": {
+          "ref_audio": "storage/voice_reference/heroine_calm.wav",
+          "ref_text": "मैं इस दुनिया की सबसे ताकतवर महारानी बनकर रहूंगी, मुझे कोई नहीं रोक सकता।"
+        },
+        "angry": {
+          "ref_audio": "storage/voice_reference/heroine_angry.wav",
+          "ref_text": "तुम्हारी इतनी हिम्मत कैसे हुई मेरे सामने खड़े होने की! अब भुगतो!"
+        },
+        "sad": {
+          "ref_audio": "storage/voice_reference/heroine_sad.wav",
+          "ref_text": "सब कुछ खत्म हो गया... क्या मैं वाकई इस मुश्किल से बच पाऊंगी?"
+        }
+      },
+      "edge_voice": "hi-IN-SwaraNeural",
+      "edge_pitch": "+12Hz",
+      "edge_rate": "+4%",
+      "description": "Sweet, expressive young female lead"
+    },
+    "system": {
+      "display_name": "AI System / Game Interface (সিস্টেম/ইন্টারফেস)",
+      "gender": "female",
+      "age_group": "young",
+      "f5_ref_audio": "storage/voice_reference/heroine_calm.wav",
+      "f5_ref_text": "चेतावनी! नया मिशन प्राप्त हुआ है, कृपया ध्यान दें।",
+      "edge_voice": "hi-IN-SwaraNeural",
+      "edge_pitch": "+25Hz",
+      "edge_rate": "+8%",
+      "description": "Crisp, fast, electronic female AI system, mentor spirit, or tutor interface"
+    },
+    "villain": {
+      "display_name": "Villain / Antagonist (ভিলেন)",
+      "gender": "male",
+      "age_group": "middle",
+      "f5_ref_audio": "storage/voice_reference/villain_aggressive.wav",
+      "f5_ref_text": "हा हा हा, तुम सब कीड़े-मकोड़े हो! मेरे सामने तुम्हारी कोई औकात नहीं!",
+      "f5_emotions": {
+        "calm": {
+          "ref_audio": "storage/voice_reference/villain_aggressive.wav",
+          "ref_text": "हा हा हा, तुम सब कीड़े-मकोड़े हो! मेरे सामने तुम्हारी कोई औकात नहीं!"
+        },
+        "angry": {
+          "ref_audio": "storage/voice_reference/villain_aggressive.wav",
+          "ref_text": "हा हा हा, तुम सब कीड़े-मकोड़े हो! मेरे सामने तुम्हारी कोई औकात नहीं!"
+        }
+      },
+      "edge_voice": "hi-IN-MadhurNeural",
+      "edge_pitch": "-35Hz",
+      "edge_rate": "-4%",
+      "description": "Deep, aggressive, imposing villain"
+    },
+    "extra_male": {
+      "display_name": "Common Male / Extra / Guards / Bystanders (কমন পুরুষ কণ্ঠ)",
+      "gender": "male",
+      "age_group": "young",
+      "f5_ref_audio": "storage/voice_reference/common_male.wav",
+      "f5_ref_text": "अरे भाई, देखो वहां क्या हो रहा है! चलो जल्दी भागो यहां से!",
+      "edge_voice": "hi-IN-MadhurNeural",
+      "edge_pitch": "+0Hz",
+      "edge_rate": "+0%",
+      "description": "Natural common male voice for all third-party male characters, guards, thugs, and bystanders"
+    },
+    "extra_female": {
+      "display_name": "Common Female / Extra / Maids / Bystanders (কমন নারী কণ্ঠ)",
+      "gender": "female",
+      "age_group": "young",
+      "f5_ref_audio": "storage/voice_reference/common_female.wav",
+      "f5_ref_text": "दीदी, बाहर बहुत भीड़ जमा हो गई है, जरा संभल कर रहना।",
+      "edge_voice": "hi-IN-SwaraNeural",
+      "edge_pitch": "+0Hz",
+      "edge_rate": "+0%",
+      "description": "Natural common female voice for all third-party female characters, maids, and passersby"
+    },
+    "father": {
+      "display_name": "Father / Elder Male (नायक/নায়িকার বাবা)",
+      "gender": "male",
+      "age_group": "elder",
+      "f5_ref_audio": "storage/voice_reference/elder_male.wav",
+      "f5_ref_text": "धैर्य रखो बेटा, जीवन में हर परीक्षा का एक समय होता है।",
+      "edge_voice": "hi-IN-MadhurNeural",
+      "edge_pitch": "-25Hz",
+      "edge_rate": "-8%",
+      "description": "Mature, authoritative elder male"
+    },
+    "mother": {
+      "display_name": "Mother / Elder Female (नायक/নায়িকার মা)",
+      "gender": "female",
+      "age_group": "elder",
+      "f5_ref_audio": "storage/voice_reference/common_female.wav",
+      "f5_ref_text": "दीदी, बाहर बहुत भीड़ जमा हो गई है, जरा संभल कर रहना।",
+      "edge_voice": "hi-IN-SwaraNeural",
+      "edge_pitch": "-22Hz",
+      "edge_rate": "-6%",
+      "description": "Warm, caring or strict elder female"
+    },
+    "mistress": {
+      "display_name": "Mistress / Rival Female / Xu Qingya (সতীন/প্রেমিকা)",
+      "gender": "female",
+      "age_group": "young",
+      "f5_ref_audio": "storage/voice_reference/heroine_calm.wav",
+      "f5_ref_text": "दीदी, बाहर बहुत भीड़ जमा हो गई है, जरा संभल कर रहना।",
+      "edge_voice": "hi-IN-SwaraNeural",
+      "edge_pitch": "+0Hz",
+      "edge_rate": "+0%",
+      "description": "Soft, sweet or manipulative rival woman / mistress"
+    },
+    "supporting_male": {
+      "display_name": "Supporting Male / Friend (বন্ধু/सहचर)",
+      "gender": "male",
+      "age_group": "young",
+      "f5_ref_audio": "storage/voice_reference/common_male.wav",
+      "f5_ref_text": "अरे भाई, देखो वहां क्या हो रहा है! चलो जल्दी भागो यहां से!",
+      "edge_voice": "hi-IN-MadhurNeural",
+      "edge_pitch": "+15Hz",
+      "edge_rate": "+3%",
+      "description": "Energetic male companion or friend"
+    },
+    "supporting_female": {
+      "display_name": "Supporting Female / Sister (বোন/বান্ধবী)",
+      "gender": "female",
+      "age_group": "young",
+      "f5_ref_audio": "storage/voice_reference/heroine_calm.wav",
+      "f5_ref_text": "मैं इस दुनिया की सबसे ताकतवर महारानी बनकर रहूंगी, मुझे कोई नहीं रोक सकता।",
+      "edge_voice": "hi-IN-SwaraNeural",
+      "edge_pitch": "+18Hz",
+      "edge_rate": "+3%",
+      "description": "Lively female companion or sister"
+    },
+    "narrator": {
+      "display_name": "Narrator / Storyteller (কথক/নৈপথ্য)",
+      "gender": "male",
+      "age_group": "neutral",
+      "f5_ref_audio": "storage/voice_reference/ravi_gupta.wav",
+      "f5_ref_text": "उन्होंने बहुत कम रखा, दो तीन हजार पर बात फसी हुई थी और उनका जो मटेरियल था, वो प्रीमियम नहीं था।",
+      "edge_voice": "hi-IN-MadhurNeural",
+      "edge_pitch": "+0Hz",
+      "edge_rate": "+0%",
+      "description": "Third-person storyteller for scene transitions"
+    }
+  }
+}

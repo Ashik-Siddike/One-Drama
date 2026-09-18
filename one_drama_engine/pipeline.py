@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import traceback
@@ -222,6 +223,7 @@ class EpisodeWorkspace:
         self.tracks_path = os.path.join(self.tts_dir, "voice_tracks.json")
         self.state_path = os.path.join(self.tts_dir, "state.json")
         self.subtitle_path = os.path.join(self.tts_dir, f"{self.stem}.hi.srt")
+        self.ass_path = os.path.join(self.tts_dir, f"{self.stem}.hi.ass")
         self.output_path = os.path.join(paths["processed"], f"{self.stem}_dubbed.mp4")
 
         ensure_dir(self.tts_dir)
@@ -266,10 +268,22 @@ def stage_separate(workspace: EpisodeWorkspace, config: dict, args) -> tuple[str
 def stage_transcribe(workspace: EpisodeWorkspace, config: dict, args) -> list[dict]:
     from modules import transcriber
 
+    registry_path = os.path.join(os.path.dirname(config["storage_paths"]["raw"]), "series_cast_registry.json")
+
     if not args.force:
         cached = read_json(workspace.transcript_path)
         if isinstance(cached, list) and cached:
             log.info("  [2/5] transcribe: cached (%d segments)", len(cached))
+            if os.path.isfile(registry_path) and "matched_role" not in cached[0]:
+                from modules import series_profiler
+
+                cached = series_profiler.align_segments_to_series_registry(
+                    workspace.vocals_path,
+                    cached,
+                    registry_path=registry_path,
+                    device=args.device,
+                )
+                write_json(workspace.transcript_path, cached)
             return cached
 
     engine = config.get("asr_engine", "sensevoice")
@@ -283,6 +297,18 @@ def stage_transcribe(workspace: EpisodeWorkspace, config: dict, args) -> list[di
         cache_path=workspace.transcript_path,
         overwrite=args.force,
     )
+
+    if os.path.isfile(registry_path):
+        from modules import series_profiler
+
+        segments = series_profiler.align_segments_to_series_registry(
+            workspace.vocals_path,
+            segments,
+            registry_path=registry_path,
+            device=args.device,
+        )
+        write_json(workspace.transcript_path, segments)
+
     workspace.mark("transcribe", segments=len(segments))
     return segments
 
@@ -300,10 +326,27 @@ def stage_translate(
         cached = read_json(workspace.script_path)
         if isinstance(cached, list) and cached:
             log.info("  [3/5] translate : cached (%d segments)", len(cached))
+            if cached[0].get("protagonist_gender"):
+                config["protagonist_gender"] = cached[0]["protagonist_gender"]
             return cached
 
+    from modules import character_detector
+    lineup = None
+    try:
+        chars_dir = os.path.join(os.path.dirname(config["storage_paths"]["raw"]), "characters")
+        lineup = character_detector.ensure_character_lineup(
+            workspace.video_path,
+            config=config,
+            output_dir=chars_dir,
+            force=args.force,
+        )
+    except Exception as c_err:
+        log.warning("Character discovery skipped (%s)", c_err)
+
+    dubbing_mode = config.get("dubbing_mode", "multi_character")
     log.info(
-        "  [3/5] translate : Gemini Flash recap (%s -> %s)...",
+        "  [3/5] translate : Gemini Flash %s (%s -> %s)...",
+        "Multi-Character Dramatic Cast Dubbing" if dubbing_mode == "multi_character" else "1st-Person Protagonist POV",
         config.get("source_language", "zh"),
         config["target_language"],
     )
@@ -311,12 +354,22 @@ def stage_translate(
         segments,
         api_key=config.get("gemini_api_key", ""),
         target_lang=config["target_language"],
-        model=config.get("gemini_model", "gemini-flash-latest"),
+        model=config.get("gemini_model", "gemini-2.5-flash"),
         story_context=story_context,
         cache_path=workspace.script_path,
         overwrite=args.force,
         api_keys=config.get("gemini_api_keys"),
+        character_lineup=lineup,
+        dubbing_mode=dubbing_mode,
+        video_path=workspace.video_path,
     )
+    if dub_segments and dub_segments[0].get("protagonist_gender"):
+        config["protagonist_gender"] = dub_segments[0]["protagonist_gender"]
+        log.info(
+            "  [3/5] Protagonist detected: '%s' (%s)",
+            dub_segments[0].get("protagonist_name", "Unknown"),
+            config["protagonist_gender"],
+        )
     workspace.mark("translate", segments=len(dub_segments))
     return dub_segments
 
@@ -341,7 +394,7 @@ def stage_tts(workspace: EpisodeWorkspace, config: dict, args, dub_segments: lis
         voice=config.get("tts_voice", "hi-IN-MadhurNeural"),
         config=config,
         atempo_min=float(sync.get("atempo_min", 0.85)),
-        atempo_max=float(sync.get("atempo_max", 1.30)),
+        atempo_max=float(sync.get("atempo_max", 2.50)),
         concurrency=args.tts_concurrency,
         manifest_path=workspace.tracks_path,
     )
@@ -363,43 +416,71 @@ def stage_render(
             log.info("  [5/5] render    : cached")
             return workspace.output_path
 
-    filler_trim_plan = None
     active_tracks = tracks
     active_segments = dub_segments
 
-    if getattr(args, "enable_filler_trim", False):
-        try:
-            from modules import filler_trimmer
-            dur = ffprobe_duration(workspace.video_path)
-            filler_trim_plan = filler_trimmer.plan_smart_trimming(
-                dur,
-                dub_segments,
-                workspace.no_vocals_path,
-            )
-            if filler_trim_plan and filler_trim_plan.get("saved_seconds", 0.0) > 0.5:
-                log.info(
-                    "  [5/5] filler trim: reducing %.1fs to %.1fs (saving %.1fs / %s)",
-                    filler_trim_plan["original_duration"],
-                    filler_trim_plan["trimmed_duration"],
-                    filler_trim_plan["saved_seconds"],
-                    filler_trim_plan["saved_percent"],
-                )
-                time_remap = filler_trim_plan["time_remap"]
-                active_segments = filler_trimmer.remap_speech_cues(dub_segments, time_remap)
-                active_tracks = []
-                for tr in tracks:
-                    new_tr = dict(tr)
-                    new_tr["start"] = filler_trimmer.remap_timestamp(time_remap, float(tr.get("start", 0.0)))
-                    active_tracks.append(new_tr)
-        except Exception as exc:
-            log.warning("Could not compute filler trimming: %s", exc)
+    # Synchronize subtitle segment boundaries with time-synced audio tracks to guarantee zero subtitle collision
+    track_ends = {t["id"]: t["end"] for t in active_tracks if "end" in t}
+    for seg in active_segments:
+        seg_id = seg.get("id")
+        if seg_id in track_ends:
+            seg["end"] = track_ends[seg_id]
+            seg["duration"] = round(seg["end"] - float(seg.get("start", 0.0)), 3)
 
+    watermark_profile = None
+    try:
+        from modules import watermark_detector
+        watermark_profile = watermark_detector.inspect_video_watermarks(
+            workspace.video_path, config, work_dir=workspace.tts_dir
+        )
+        workspace.mark("inspect_watermarks", **watermark_profile)
+    except Exception as w_err:
+        log.warning("Watermark inspection skipped (%s)", w_err)
+
+    burn_subs = getattr(args, "burn_subtitles", False) or bool(config.get("burn_subtitles", True))
     subtitle_path = None
-    if args.burn_subtitles:
+    if burn_subs:
+        # Standard SRT file for YouTube upload and external players
         transcriber.segments_to_srt(active_segments, workspace.subtitle_path, text_key="recap_text")
-        subtitle_path = workspace.subtitle_path
 
-    log.info("  [5/5] render    : filtering video + mixing audio...")
+        # Pixel-perfect ASS file matching video geometry for hard-burning into the frosted blur plate
+        vw, vh = video_processor.probe_video_dimensions(workspace.video_path)
+        wp_sy = (watermark_profile or {}).get("subtitle_y_start")
+        wp_h = (watermark_profile or {}).get("subtitle_height")
+        if wp_sy:
+            sub_y = int(wp_sy)
+            box_h = int(wp_h or round(vh * 0.08))
+            f_size = 26
+        elif vh > vw:
+            sub_y = int(round(vh * 0.72))
+            box_h = int(round(vh * 0.085))
+            f_size = 26
+        else:
+            sub_y = int(round(vh * 0.82))
+            box_h = int(round(vh * 0.09))
+            f_size = 28
+        margin_v = max(16, int(vh - (sub_y + box_h) + max(4, (box_h - f_size) // 2)))
+
+        sub_style = config.get("subtitle_styling", {})
+        text_col = sub_style.get("primary_color", "&H00000000")
+        outl_col = sub_style.get("outline_color", "&H00FFFFFF")
+        outl_w = float(sub_style.get("outline_width", 1.5))
+
+        transcriber.segments_to_ass(
+            active_segments,
+            workspace.ass_path,
+            width=vw,
+            height=vh,
+            margin_v=margin_v,
+            font_size=f_size,
+            text_color=text_col,
+            outline_color=outl_col,
+            outline_width=outl_w,
+            text_key="recap_text",
+        )
+        subtitle_path = workspace.ass_path
+
+    log.info("  [5/5] render    : filtering video + mixing audio (smart-crop/glassmorphism)...")
     output = video_processor.render_dubbed_episode(
         workspace.video_path,
         workspace.no_vocals_path,
@@ -407,7 +488,8 @@ def stage_render(
         workspace.output_path,
         config,
         subtitle_path=subtitle_path,
-        filler_trim_plan=filler_trim_plan,
+        speech_segments=active_segments,
+        watermark_profile=watermark_profile,
     )
     workspace.mark("render", output=output)
     return output
@@ -522,42 +604,140 @@ def run_pipeline(config: dict, args) -> int:
     if args.limit:
         episodes = episodes[: args.limit]
 
-    if not episodes:
-        log.error(
-            "No episodes found in %s. Drop ep_001.mp4, ep_002.mp4 ... there, or use "
-            "--download-playlist.",
-            raw_dir,
-        )
-        return 1
+    is_streaming = bool(getattr(args, "stream_download", None))
 
-    total_runtime = sum(ffprobe_duration(path) for path in episodes)
-    log.info("")
-    log.info("#" * 74)
-    log.info("ONE DRAMA ENGINE")
-    log.info("  episodes        : %d (%s of source)", len(episodes), human_time(total_runtime))
-    log.info("  target language : %s", config["target_language"])
-    log.info("  whisper model   : %s", config["whisper_model"])
-    log.info("  tts voice       : %s", config["tts_voice"])
-    log.info("  gemini model    : %s", config.get("gemini_model"))
-    log.info("  output          : %s", master_path)
-    log.info("#" * 74)
+    if is_streaming:
+        import threading
+        from queue import Queue
+        stream_queue: Queue[str | None] = Queue()
+        stream_error: list[Exception] = []
 
-    results: list[dict[str, Any]] = []
-    story_context = args.story_context or ""
-    pipeline_started = time.perf_counter()
+        def _stream_downloader():
+            try:
+                from modules import downloader
+                custom_blocks = config.get("discovery", {}).get("blocked_franchises", [])
+                log.info("⚡ [Producer Thread] Streaming background downloader active for: %s", args.stream_download)
+                downloader.download_series_by_query(
+                    args.stream_download,
+                    raw_dir,
+                    limit=args.limit,
+                    cookies_from_browser=args.cookies,
+                    custom_blocklist=custom_blocks,
+                    on_episode_ready=lambda ep: stream_queue.put(ep),
+                )
+            except Exception as exc:
+                stream_error.append(exc)
+                log.error("Background stream download error: %s", exc)
+            finally:
+                stream_queue.put(None)
 
-    for index, video_path in enumerate(episodes, start=1):
+        dl_thread = threading.Thread(target=_stream_downloader, daemon=True)
+        dl_thread.start()
+
         log.info("")
-        log.info(">>> %d/%d", index, len(episodes))
-        result = process_episode(video_path, config, args, story_context)
-        results.append(result)
+        log.info("#" * 74)
+        log.info("ONE DRAMA ENGINE (CONCURRENT STREAMING PIPELINE)")
+        log.info("  stream source   : %s", args.stream_download)
+        log.info("  target language : %s", config["target_language"])
+        log.info("  whisper model   : %s", config["whisper_model"])
+        log.info("  tts voice       : %s", config["tts_voice"])
+        log.info("  gemini model    : %s", config.get("gemini_model"))
+        log.info("  output          : %s", master_path)
+        log.info("#" * 74)
 
-        if result["ok"] and args.carry_context and result.get("context"):
-            story_context = result["context"]
+        results: list[dict[str, Any]] = []
+        story_context = args.story_context or ""
+        pipeline_started = time.perf_counter()
 
-        if not result["ok"] and not args.keep_going:
-            log.error("Stopping after a failure. Pass --keep-going to skip failures.")
-            break
+        existing_raw = list_episodes(raw_dir)
+        seen_paths = set(existing_raw)
+        ready_episodes: list[str] = list(existing_raw)
+        stream_done = False
+
+        index = 1
+        while True:
+            # Drain any ready episodes currently in the queue without blocking
+            while not stream_queue.empty():
+                try:
+                    item = stream_queue.get_nowait()
+                    if item is None:
+                        stream_done = True
+                    elif item not in seen_paths and item not in ready_episodes:
+                        ready_episodes.append(item)
+                except Exception:
+                    break
+
+            # If no episodes ready, block until the next one arrives from the downloader thread
+            if not ready_episodes:
+                if stream_done:
+                    log.info("🏁 [Streaming Consumer] All streaming downloads complete! Finalizing episodes.")
+                    break
+                log.info("⏳ [Streaming Consumer] Waiting for next episode from background stream...")
+                next_item = stream_queue.get()
+                if next_item is None:
+                    stream_done = True
+                    log.info("🏁 [Streaming Consumer] All streaming downloads complete! Finalizing episodes.")
+                    break
+                if next_item not in seen_paths and next_item not in ready_episodes:
+                    ready_episodes.append(next_item)
+
+            # Sort ready episodes by natural filename order (e.g. ep_001, ep_002, ...)
+            ready_episodes.sort(
+                key=lambda p: [int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", os.path.basename(p))]
+            )
+
+            video_path = ready_episodes.pop(0)
+            seen_paths.add(video_path)
+
+            log.info("")
+            log.info(">>> [Streaming Pipeline] Episode %d: %s", index, os.path.basename(video_path))
+            result = process_episode(video_path, config, args, story_context)
+            results.append(result)
+
+            if result["ok"] and args.carry_context and result.get("context"):
+                story_context = result["context"]
+
+            if not result["ok"] and not args.keep_going:
+                log.error("Stopping after a failure. Pass --keep-going to skip failures.")
+                break
+            index += 1
+    else:
+        if not episodes:
+            log.error(
+                "No episodes found in %s. Drop ep_001.mp4, ep_002.mp4 ... there, or use "
+                "--download-playlist.",
+                raw_dir,
+            )
+            return 1
+
+        total_runtime = sum(ffprobe_duration(path) for path in episodes)
+        log.info("")
+        log.info("#" * 74)
+        log.info("ONE DRAMA ENGINE")
+        log.info("  episodes        : %d (%s of source)", len(episodes), human_time(total_runtime))
+        log.info("  target language : %s", config["target_language"])
+        log.info("  whisper model   : %s", config["whisper_model"])
+        log.info("  tts voice       : %s", config["tts_voice"])
+        log.info("  gemini model    : %s", config.get("gemini_model"))
+        log.info("  output          : %s", master_path)
+        log.info("#" * 74)
+
+        results: list[dict[str, Any]] = []
+        story_context = args.story_context or ""
+        pipeline_started = time.perf_counter()
+
+        for index, video_path in enumerate(episodes, start=1):
+            log.info("")
+            log.info(">>> %d/%d", index, len(episodes))
+            result = process_episode(video_path, config, args, story_context)
+            results.append(result)
+
+            if result["ok"] and args.carry_context and result.get("context"):
+                story_context = result["context"]
+
+            if not result["ok"] and not args.keep_going:
+                log.error("Stopping after a failure. Pass --keep-going to skip failures.")
+                break
 
     succeeded = [r for r in results if r["ok"]]
     failed = [r for r in results if not r["ok"]]
@@ -776,20 +956,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     behaviour.add_argument("--story-context", default="", help="Series synopsis / name sheet")
     behaviour.add_argument(
-        "--enable-filler-trim",
-        action="store_true",
-        help="Smart filler trimming: eliminates dead air and non-dialogue stalls with 0.4s safety cushion",
-    )
-    behaviour.add_argument(
         "--generate-shorts",
         action="store_true",
         help="Carve vertical 9:16 high-CTR teaser Short from master compilation with hook badges",
     )
+    behaviour.add_argument(
+        "--stream-download",
+        metavar="QUERY_OR_URL",
+        help="Streaming pipeline: downloads episodes in a background thread while concurrently processing ready episodes",
+    )
     behaviour.add_argument("--verbose", "-v", action="store_true", help="Debug logging")
+
+    try:
+        import torch
+        default_device = "cuda" if torch.cuda.is_available() else "cpu"
+    except Exception:
+        default_device = "cpu"
 
     performance = parser.add_argument_group("performance")
     performance.add_argument(
-        "--device", choices=["cuda", "cpu"], help="Force the torch device for Demucs/Whisper"
+        "--device",
+        choices=["cuda", "cpu"],
+        default=default_device,
+        help="Force the torch device for Demucs/Whisper/SenseVoice (defaults to CUDA if available)",
     )
     performance.add_argument("--demucs-jobs", type=int, default=1, help="Demucs worker processes")
     performance.add_argument(
@@ -851,6 +1040,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--next-clean-series",
         action="store_true",
         help="Query Safe Creators Brain & 3D Radar for next unworked, 100%% clean series",
+    )
+    utilities.add_argument(
+        "--list-hongguo",
+        action="store_true",
+        help="List all downloaded dramas from Hongguo Downloader in storage/hongguo_downloads/ and exit",
+    )
+    utilities.add_argument(
+        "--from-hongguo",
+        nargs="?",
+        const="latest",
+        metavar="DRAMA",
+        help="Stage a downloaded Hongguo drama (index, title or 'latest') into storage/raw_episodes/ for processing",
     )
     return parser
 
@@ -1053,6 +1254,44 @@ def main(argv: list[str] | None = None) -> int:
             candidate["url"],
         )
         return 0
+
+    if args.list_hongguo:
+        import sys
+
+        if hasattr(sys.stdout, "reconfigure"):
+            try:
+                sys.stdout.reconfigure(encoding="utf-8")
+            except Exception:
+                pass
+        from modules import hongguo_ingest
+
+        dramas = hongguo_ingest.list_hongguo_dramas()
+        print("\n" + "=" * 82)
+        print("  📥 DOWNLOADED HONGGUO DRAMAS IN STORAGE (ZERO-WATERMARK 1080P) 📥")
+        print("=" * 82)
+        if not dramas:
+            print("No dramas downloaded yet. Download series using Hongguo Downloader app first.")
+        else:
+            print(f"{'#':<4} {'SCORE':<7} {'EPISODES':<10} {'TITLE'}")
+            print("-" * 82)
+            for d in dramas:
+                print(
+                    f"[{d['index']}]  {str(d['score']):<7} {str(d['episodes_count']) + ' eps':<10} {d['title']}"
+                )
+        print("=" * 82)
+        return 0
+
+    if args.from_hongguo:
+        from modules import hongguo_ingest
+
+        raw_dir = config["storage_paths"]["raw"]
+        res = hongguo_ingest.stage_hongguo_drama(args.from_hongguo, raw_dir=raw_dir)
+        log.info(
+            "Staged %d episodes of '%s' into %s (ready for dubbing!).",
+            res["total_staged"],
+            res["title"],
+            raw_dir,
+        )
 
     if args.download_series:
         from modules import downloader

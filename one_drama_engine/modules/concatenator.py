@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any, Sequence
 
 from . import (
@@ -32,17 +33,22 @@ VIDEO_EXTENSIONS: tuple[str, ...] = (".mp4", ".mkv", ".mov", ".m4v", ".ts", ".we
 SAMPLE_RATE = 44100
 
 
+def _natural_sort_key(s: str) -> list[Any]:
+    """Sort strings with embedded numbers naturally (e.g. 1, 2, ... 9, 10)."""
+    return [int(text) if text.isdigit() else text.lower() for text in re.split(r"(\d+)", s)]
+
+
 # --------------------------------------------------------------------------- #
 # Discovery + probing
 # --------------------------------------------------------------------------- #
 def collect_episodes(processed_dir: str) -> list[str]:
-    """Return processed episode files in alphabetical (== episode) order."""
+    """Return processed episode files in natural numerical (== episode) order."""
     if not os.path.isdir(processed_dir):
         raise PipelineError(f"Processed directory does not exist: {processed_dir}")
 
     files = [
         os.path.join(processed_dir, name)
-        for name in sorted(os.listdir(processed_dir), key=str.lower)
+        for name in sorted(os.listdir(processed_dir), key=_natural_sort_key)
         if os.path.splitext(name)[1].lower() in VIDEO_EXTENSIONS
         and os.path.isfile(os.path.join(processed_dir, name))
         and os.path.getsize(os.path.join(processed_dir, name)) > 8192

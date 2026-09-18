@@ -56,21 +56,26 @@ Thumbs.db
 *.env.local
 
 # Heavy Pipeline Storage (Exclude gigabytes of video, separated stems, raw tts)
-one_drama_engine/storage/raw_episodes/*
-!one_drama_engine/storage/raw_episodes/.gitkeep
-one_drama_engine/storage/audio_separated/*
-!one_drama_engine/storage/audio_separated/.gitkeep
-one_drama_engine/storage/tts_output/*
-!one_drama_engine/storage/tts_output/.gitkeep
-one_drama_engine/storage/processed_episodes/*
-!one_drama_engine/storage/processed_episodes/.gitkeep
-one_drama_engine/storage/master_export/*
-!one_drama_engine/storage/master_export/.gitkeep
+one_drama_engine/storage/raw_episodes/
+one_drama_engine/storage/audio_separated/
+one_drama_engine/storage/tts_output/
+one_drama_engine/storage/processed_episodes/
+one_drama_engine/storage/master_export/
 one_drama_engine/storage/voice_reference/*.wav
-!one_drama_engine/storage/voice_reference/README.md
+one_drama_engine/storage/voice_reference/*.mp3
 one_drama_engine/storage/archive_previous_run/
+one_drama_engine/storage/archive/
 one_drama_engine/storage/previews/
 one_drama_engine/storage/full_downloads/
+one_drama_engine/storage/hongguo_downloads/
+one_drama_engine/storage/inspect_frames/
+one_drama_engine/storage/characters/samples/
+one_drama_engine/storage/**/*.jpg
+one_drama_engine/storage/**/*.png
+one_drama_engine/storage/**/*.wav
+one_drama_engine/storage/**/*.mp3
+one_drama_engine/storage/cam_output.json
+
 
 # HuggingFace & PyTorch model caches
 *.safetensors
@@ -78,5 +83,12 @@ one_drama_engine/storage/full_downloads/
 *.pt
 *.onnx
 
-one_drama_engine/scratch/*
-scratch/*
+one_drama_engine/bin/
+one_drama_engine/scratch*
+one_drama_engine/*.wav
+one_drama_engine/*.mp3
+assets/*.wav
+graphify-out/
+one_drama_engine/graphify-out/
+.agents/
+*.lnk

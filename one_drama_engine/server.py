@@ -11,15 +11,17 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
+import shutil
 import sys
 import threading
 import time
 from typing import Any, Optional
 
 import psutil
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, UploadFile, File, Form
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, UploadFile, File, Form, Body
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -27,7 +29,11 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
+VENV_PYTHON = os.path.join(BASE_DIR, ".venv", "Scripts", "python.exe")
+PYTHON_EXEC = VENV_PYTHON if os.path.isfile(VENV_PYTHON) else sys.executable
+
 from modules import (
+    ensure_dir,
     human_time,
     log,
     read_json,
@@ -36,6 +42,7 @@ from modules import (
     downloader,
     concatenator,
     seo_generator,
+    workspace_manager,
 )
 from pipeline import load_config, DEFAULT_CONFIG_PATH
 
@@ -64,6 +71,7 @@ _PIPELINE_STATE: dict[str, Any] = {
     "last_error": None,
     "logs": [],
 }
+_ACTIVE_SUBPROCESSES: list[Any] = []
 
 
 def _add_log(message: str) -> None:
@@ -88,6 +96,12 @@ def _get_dir_size_mb(path: str) -> float:
     return round(total / (1024 * 1024), 2)
 
 
+def _natural_sort_key(s: str) -> list[Any]:
+    """Sort strings with embedded numbers naturally (e.g. 1, 2, ... 9, 10)."""
+    return [int(text) if text.isdigit() else text.lower() for text in re.split(r"(\d+)", s)]
+
+
+
 # --------------------------------------------------------------------------- #
 # Telemetry & System Status
 # --------------------------------------------------------------------------- #
@@ -96,18 +110,41 @@ def get_health():
     return {"status": "healthy", "timestamp": time.time(), "app": "OneDrama Studio"}
 
 
+def _get_nvidia_smi_telemetry() -> dict[str, Any]:
+    """Fast query for GPU compute utilization % and temperature."""
+    import subprocess
+    try:
+        out = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=utilization.gpu,utilization.memory,temperature.gpu", "--format=csv,noheader,nounits"],
+            text=True,
+            timeout=1.5,
+        )
+        parts = [p.strip() for p in out.strip().split(",")]
+        if len(parts) >= 3:
+            return {
+                "util_percent": float(parts[0]),
+                "mem_util_percent": float(parts[1]),
+                "temperature_c": float(parts[2]),
+            }
+    except Exception:
+        pass
+    return {"util_percent": 0.0, "mem_util_percent": 0.0, "temperature_c": 0.0}
+
+
 @app.get("/api/system/stats")
 def get_system_stats():
     config = load_config(DEFAULT_CONFIG_PATH)
     paths = config["storage_paths"]
 
-    # GPU Telemetry via PyTorch CUDA
+    # GPU Telemetry via PyTorch CUDA & nvidia-smi
     gpu_data: dict[str, Any] = {
         "available": False,
         "name": "N/A",
         "vram_used_gb": 0.0,
         "vram_total_gb": 0.0,
         "vram_percent": 0.0,
+        "util_percent": 0.0,
+        "temperature_c": 0.0,
         "device_count": 0,
     }
     try:
@@ -116,12 +153,15 @@ def get_system_stats():
         if torch.cuda.is_available():
             free_bytes, total_bytes = torch.cuda.mem_get_info()
             used_bytes = total_bytes - free_bytes
+            smi = _get_nvidia_smi_telemetry()
             gpu_data = {
                 "available": True,
                 "name": torch.cuda.get_device_name(0),
                 "vram_used_gb": round(used_bytes / (1024**3), 2),
                 "vram_total_gb": round(total_bytes / (1024**3), 2),
                 "vram_percent": round((used_bytes / total_bytes) * 100, 1),
+                "util_percent": smi.get("util_percent", 0.0),
+                "temperature_c": smi.get("temperature_c", 0.0),
                 "device_count": torch.cuda.device_count(),
             }
     except Exception as exc:
@@ -165,6 +205,105 @@ def get_system_stats():
     }
 
 
+class OpenFolderRequest(BaseModel):
+    category: Optional[str] = None  # "master", "processed", "raw", "shorts", "tts", "drive", "workspace"
+    path: Optional[str] = None      # exact file or folder path
+    select_file: Optional[str] = None  # optional file inside the folder to highlight
+
+
+@app.post("/api/system/open_folder")
+def open_folder_in_file_manager(req: OpenFolderRequest = Body(...)):
+    """Opens the local file manager (Windows File Explorer, macOS Finder, Linux)
+    and highlights the specified file or opens the target folder with 1 click.
+    """
+    config = load_config(DEFAULT_CONFIG_PATH)
+    paths = config.get("storage_paths", {})
+
+    target: Optional[str] = None
+
+    if req.path and req.path.strip():
+        raw_target = req.path.strip()
+        if os.path.isabs(raw_target):
+            target = raw_target
+        else:
+            # Resolve relative to project root or BASE_DIR
+            project_root = os.path.dirname(BASE_DIR)
+            cand1 = os.path.normpath(os.path.join(project_root, raw_target))
+            cand2 = os.path.normpath(os.path.join(BASE_DIR, raw_target))
+            target = cand1 if os.path.exists(cand1) else cand2
+    elif req.category:
+        cat = req.category.lower().strip()
+        if cat in ("master", "master_export", "movies"):
+            target = paths.get("master")
+        elif cat in ("processed", "processed_episodes", "dubbed"):
+            target = paths.get("processed")
+        elif cat in ("raw", "raw_episodes"):
+            target = paths.get("raw")
+        elif cat in ("shorts", "viral_shorts"):
+            target = os.path.join(paths.get("master", os.path.join(BASE_DIR, "storage", "master_export")), "shorts")
+        elif cat in ("tts", "tts_output", "audio"):
+            target = paths.get("tts")
+        elif cat in ("separated", "audio_separated"):
+            target = paths.get("separated")
+        elif cat in ("drive", "gdrive", "google_drive"):
+            from modules import drive_sync
+            gdrive_root = drive_sync.find_google_drive_root(config.get("google_drive_sync", {}).get("custom_drive_path"))
+            if gdrive_root:
+                target = os.path.join(gdrive_root, config.get("google_drive_sync", {}).get("destination_folder_name", "OneDrama_Uploads"))
+            else:
+                target = paths.get("master")
+        elif cat in ("workspace", "root", "project"):
+            target = os.path.dirname(BASE_DIR)
+        else:
+            target = paths.get(cat, paths.get("master"))
+    else:
+        target = paths.get("master")
+
+    if not target:
+        raise HTTPException(status_code=400, detail="Target path or category not specified")
+
+    target = os.path.normpath(os.path.abspath(target))
+
+    # If select_file is provided and target is a directory, point directly to file
+    if req.select_file:
+        candidate = os.path.normpath(os.path.join(target, req.select_file.strip()))
+        if os.path.exists(candidate):
+            target = candidate
+
+    is_file = os.path.isfile(target)
+    folder_to_ensure = os.path.dirname(target) if is_file else target
+    os.makedirs(folder_to_ensure, exist_ok=True)
+
+    import platform
+    import subprocess
+    sys_plat = platform.system().lower()
+
+    try:
+        if "windows" in sys_plat:
+            if is_file and os.path.exists(target):
+                # /select, opens explorer and highlights the file
+                subprocess.Popen(f'explorer.exe /select,"{target}"')
+            else:
+                # Open directory directly
+                os.startfile(folder_to_ensure)
+        elif "darwin" in sys_plat:  # macOS Finder
+            if is_file and os.path.exists(target):
+                subprocess.Popen(["open", "-R", target])
+            else:
+                subprocess.Popen(["open", folder_to_ensure])
+        else:  # Linux
+            subprocess.Popen(["xdg-open", folder_to_ensure])
+
+        return {
+            "status": "success",
+            "message": f"Opened in File Manager: {os.path.basename(target) if is_file else target}",
+            "path": target,
+            "is_file": is_file,
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to launch file manager: {str(exc)}")
+
+
 # --------------------------------------------------------------------------- #
 # Project & Episode Asset Inspector
 # --------------------------------------------------------------------------- #
@@ -178,7 +317,7 @@ def get_projects():
     if os.path.isdir(paths["raw"]):
         raw_files = sorted(
             [f for f in os.listdir(paths["raw"]) if not f.startswith(".")],
-            key=lambda x: x.lower(),
+            key=_natural_sort_key,
         )
 
     episodes = []
@@ -223,13 +362,15 @@ def get_projects():
                     "rendered": is_rendered,
                 },
                 "segment_count": seg_count,
+                "raw_path": raw_path,
+                "processed_path": proc_file if is_rendered else None,
             }
         )
 
     # Master movie files
     master_files = []
     if os.path.isdir(paths["master"]):
-        for f in os.listdir(paths["master"]):
+        for f in sorted(os.listdir(paths["master"]), key=_natural_sort_key):
             if f.endswith(".mp4"):
                 fp = os.path.join(paths["master"], f)
                 master_files.append(
@@ -260,6 +401,249 @@ def get_projects():
     }
 
 
+@app.get("/api/projects/workspace_status")
+def get_workspace_status():
+    return workspace_manager.get_active_workspace_status()
+
+
+@app.post("/api/projects/archive")
+def archive_workspace(project_name: Optional[str] = Query(None)):
+    return workspace_manager.archive_and_reset_workspace(project_name=project_name)
+
+
+@app.get("/api/projects/archives")
+def get_archives():
+    return workspace_manager.list_archives()
+
+
+# --------------------------------------------------------------------------- #
+# Local Drama File Ingestion & Drag-and-Drop Ingest API
+# --------------------------------------------------------------------------- #
+
+class ScanLocalPathRequest(BaseModel):
+    path: str
+
+
+class ImportLocalPathRequest(BaseModel):
+    path: str
+    archive_previous: bool = False
+    copy_or_move: str = "copy"  # "copy" or "move"
+    rename_to_standard: bool = True
+    selected_files: Optional[list[str]] = None
+
+
+_VIDEO_EXTS = {".mp4", ".mkv", ".mov", ".flv", ".ts", ".webm", ".avi", ".m4v"}
+_EPISODE_REGEXES = [
+    re.compile(r"(?:ep|episode|第)\s*(\d+)", re.IGNORECASE),
+    re.compile(r"(\d+)\s*(?:集|话|話|part|p\b)", re.IGNORECASE),
+    re.compile(r"[\[\(（【](\d+)[\]\)）】]"),
+    re.compile(r"(?:^|[^\d])(\d{1,4})(?:$|[^\d])"),
+]
+
+
+def _extract_episode_num(filename: str) -> Optional[int]:
+    stem, _ = os.path.splitext(filename)
+    for rgx in _EPISODE_REGEXES:
+        match = rgx.search(stem)
+        if match:
+            try:
+                return int(match.group(1))
+            except ValueError:
+                pass
+    return None
+
+
+def _natural_sort_key(filename: str):
+    num = _extract_episode_num(filename)
+    if num is not None:
+        return (0, num, filename.lower())
+    parts = re.split(r"(\d+)", filename)
+    return (1, 0, [int(p) if p.isdigit() else p.lower() for p in parts])
+
+
+def _scan_directory_videos(target_path: str) -> tuple[list[dict[str, Any]], float]:
+    clean_path = target_path.strip().strip('"').strip("'")
+    if not os.path.exists(clean_path):
+        return [], 0.0
+
+    raw_candidates: list[str] = []
+    if os.path.isfile(clean_path):
+        if os.path.splitext(clean_path)[1].lower() in _VIDEO_EXTS:
+            raw_candidates.append(clean_path)
+    elif os.path.isdir(clean_path):
+        for root, dirs, files in os.walk(clean_path):
+            depth = os.path.relpath(root, clean_path).count(os.sep)
+            if depth > 2:
+                dirs.clear()
+                continue
+            for f in files:
+                if f.startswith("."):
+                    continue
+                if os.path.splitext(f)[1].lower() in _VIDEO_EXTS:
+                    raw_candidates.append(os.path.join(root, f))
+
+    # Sort files naturally
+    raw_candidates.sort(key=lambda p: _natural_sort_key(os.path.basename(p)))
+
+    items = []
+    total_bytes = 0
+    for idx, full_fp in enumerate(raw_candidates, start=1):
+        try:
+            sz = os.path.getsize(full_fp)
+        except OSError:
+            sz = 0
+        total_bytes += sz
+        bname = os.path.basename(full_fp)
+        ext = os.path.splitext(bname)[1].lower()
+        num = _extract_episode_num(bname)
+        proposed = f"ep_{idx:03d}{ext}"
+        items.append({
+            "original_filename": bname,
+            "full_path": full_fp,
+            "size_mb": round(sz / (1024 * 1024), 2),
+            "detected_ep_index": num if num is not None else idx,
+            "proposed_filename": proposed,
+        })
+    return items, round(total_bytes / (1024 * 1024), 2)
+
+
+@app.post("/api/projects/scan_local_path")
+def scan_local_path(req: ScanLocalPathRequest):
+    clean_path = req.path.strip().strip('"').strip("'")
+    if not clean_path:
+        raise HTTPException(status_code=400, detail="Path cannot be empty.")
+    if not os.path.exists(clean_path):
+        return {
+            "valid": False,
+            "path": clean_path,
+            "is_directory": False,
+            "total_videos": 0,
+            "total_size_mb": 0.0,
+            "videos": [],
+            "message": f"Path does not exist on host: {clean_path}",
+        }
+
+    is_dir = os.path.isdir(clean_path)
+    videos, total_size_mb = _scan_directory_videos(clean_path)
+    return {
+        "valid": bool(videos),
+        "path": clean_path,
+        "is_directory": is_dir,
+        "total_videos": len(videos),
+        "total_size_mb": total_size_mb,
+        "videos": videos,
+        "message": (
+            f"Found {len(videos)} video files ({total_size_mb} MB)."
+            if videos
+            else "No video files (.mp4, .mkv, .mov, etc.) found in this location."
+        ),
+    }
+
+
+@app.post("/api/projects/import_local_path")
+def import_local_path(req: ImportLocalPathRequest):
+    clean_path = req.path.strip().strip('"').strip("'")
+    if not clean_path or not os.path.exists(clean_path):
+        raise HTTPException(status_code=400, detail=f"Invalid or non-existent path: {clean_path}")
+
+    config = load_config(DEFAULT_CONFIG_PATH)
+    raw_dir = config["storage_paths"]["raw"]
+    ensure_dir(raw_dir)
+
+    if req.archive_previous:
+        archive_res = workspace_manager.archive_and_reset_workspace(project_name=f"Ingest_{int(time.time())}")
+        ensure_dir(raw_dir)
+        _add_log(f"📦 Previous workspace archived ({archive_res.get('total_files', 0)} files moved).")
+
+    videos, _ = _scan_directory_videos(clean_path)
+    if not videos:
+        raise HTTPException(status_code=400, detail="No video files found to import.")
+
+    if req.selected_files:
+        selected_set = set(req.selected_files)
+        videos = [v for v in videos if v["original_filename"] in selected_set or v["full_path"] in selected_set]
+
+    imported = []
+    is_move = req.copy_or_move.lower() == "move"
+
+    for idx, v in enumerate(videos, start=1):
+        src_path = v["full_path"]
+        ext = os.path.splitext(v["original_filename"])[1].lower()
+        target_filename = f"ep_{idx:03d}{ext}" if req.rename_to_standard else v["original_filename"]
+        dest_path = os.path.join(raw_dir, target_filename)
+
+        try:
+            if is_move:
+                shutil.move(src_path, dest_path)
+            else:
+                shutil.copy2(src_path, dest_path)
+            imported.append({
+                "filename": target_filename,
+                "original_filename": v["original_filename"],
+                "size_mb": v["size_mb"],
+                "path": dest_path,
+            })
+        except Exception as exc:
+            _add_log(f"⚠️ Failed to {'move' if is_move else 'copy'} {v['original_filename']}: {exc}")
+
+    _add_log(f"📥 Successfully imported {len(imported)} episodes into storage/raw_episodes.")
+    return {
+        "status": "success",
+        "imported_count": len(imported),
+        "episodes": imported,
+        "message": f"Successfully imported {len(imported)} episodes into raw workspace.",
+    }
+
+
+@app.post("/api/projects/upload_episodes")
+async def upload_episodes(
+    files: list[UploadFile] = File(...),
+    archive_previous: bool = Form(False),
+    rename_to_standard: bool = Form(True),
+):
+    config = load_config(DEFAULT_CONFIG_PATH)
+    raw_dir = config["storage_paths"]["raw"]
+    ensure_dir(raw_dir)
+
+    if archive_previous:
+        archive_res = workspace_manager.archive_and_reset_workspace(project_name=f"DirectUpload_{int(time.time())}")
+        ensure_dir(raw_dir)
+        _add_log(f"📦 Previous workspace archived before direct upload ({archive_res.get('total_files', 0)} files moved).")
+
+    # Sort files naturally
+    sorted_files = sorted(files, key=lambda f: _natural_sort_key(f.filename or ""))
+    imported = []
+
+    for idx, f in enumerate(sorted_files, start=1):
+        orig_name = f.filename or f"episode_{idx}.mp4"
+        ext = os.path.splitext(orig_name)[1].lower()
+        if ext not in _VIDEO_EXTS:
+            continue
+
+        target_name = f"ep_{idx:03d}{ext}" if rename_to_standard else orig_name
+        dest_path = os.path.join(raw_dir, target_name)
+
+        with open(dest_path, "wb") as out_fp:
+            while chunk := await f.read(1024 * 1024 * 4):  # 4MB chunks
+                out_fp.write(chunk)
+
+        sz_mb = round(os.path.getsize(dest_path) / (1024 * 1024), 2)
+        imported.append({
+            "filename": target_name,
+            "original_filename": orig_name,
+            "size_mb": sz_mb,
+            "path": dest_path,
+        })
+
+    _add_log(f"📥 Direct dropzone uploaded {len(imported)} episodes into storage/raw_episodes.")
+    return {
+        "status": "success",
+        "imported_count": len(imported),
+        "episodes": imported,
+        "message": f"Successfully uploaded {len(imported)} episodes.",
+    }
+
+
 @app.get("/api/projects/episodes/{stem}")
 def get_episode_details(stem: str):
     config = load_config(DEFAULT_CONFIG_PATH)
@@ -276,6 +660,78 @@ def get_episode_details(stem: str):
         "recap_script": recap_script,
         "tracks": tracks,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Character Studio & Multi-Voice Cast Management
+# --------------------------------------------------------------------------- #
+@app.get("/api/characters/cast")
+def get_character_cast():
+    config = load_config(DEFAULT_CONFIG_PATH)
+    paths = config.get("storage_paths", {})
+    chars_dir = os.path.join(os.path.dirname(paths.get("raw", "storage/raw_episodes")), "characters")
+    lineup_json = os.path.join(chars_dir, "character_lineup.json")
+    lineup_img = os.path.join(chars_dir, "character_lineup.jpg")
+    
+    registry_path = os.path.join(BASE_DIR, "config", "characters_registry.json")
+    if not os.path.isfile(registry_path):
+        registry_path = os.path.abspath("config/characters_registry.json")
+
+    lineup = read_json(lineup_json, default={}) if os.path.isfile(lineup_json) else {}
+    registry = read_json(registry_path, default={}) if os.path.isfile(registry_path) else {}
+
+    return {
+        "lineup": lineup,
+        "registry": registry,
+        "has_sheet_image": os.path.isfile(lineup_img),
+        "sheet_image_url": "/api/characters/lineup_image" if os.path.isfile(lineup_img) else None,
+    }
+
+
+@app.get("/api/characters/lineup_image")
+def get_character_lineup_image():
+    config = load_config(DEFAULT_CONFIG_PATH)
+    paths = config.get("storage_paths", {})
+    chars_dir = os.path.join(os.path.dirname(paths.get("raw", "storage/raw_episodes")), "characters")
+    lineup_img = os.path.join(chars_dir, "character_lineup.jpg")
+    if os.path.isfile(lineup_img):
+        return FileResponse(lineup_img, media_type="image/jpeg")
+    raise HTTPException(status_code=404, detail="Character lineup sheet image not found")
+
+
+@app.post("/api/characters/registry")
+def update_character_registry(payload: dict = Body(...)):
+    registry_path = os.path.abspath("config/characters_registry.json")
+    write_json(registry_path, payload)
+    _add_log("🎭 Character voice registry updated.")
+    return {"status": "success", "registry": payload}
+
+
+@app.post("/api/characters/detect")
+def trigger_character_detection():
+    from modules import character_detector
+    config = load_config(DEFAULT_CONFIG_PATH)
+    paths = config.get("storage_paths", {})
+    raw_dir = paths.get("raw", "storage/raw_episodes")
+    files = [
+        os.path.join(raw_dir, f)
+        for f in sorted(os.listdir(raw_dir))
+        if f.lower().endswith((".mp4", ".mkv", ".webm"))
+    ] if os.path.isdir(raw_dir) else []
+
+    if not files:
+        raise HTTPException(status_code=400, detail="No raw episode files found in storage/raw_episodes")
+
+    chars_dir = os.path.join(os.path.dirname(raw_dir), "characters")
+    _add_log(f"🔍 Scanning {len(files)} episode(s) to discover drama cast with Gemini Vision...")
+    lineup = character_detector.ensure_character_lineup(files, config, output_dir=chars_dir, force=True)
+    _add_log(f"✅ Discovered {len(lineup.get('characters', []))} character(s) in cast lineup.")
+    return {
+        "status": "success",
+        "lineup": lineup,
+        "sheet_image_url": "/api/characters/lineup_image",
+    }
+
 
 
 # --------------------------------------------------------------------------- #
@@ -443,7 +899,7 @@ def get_episode_scenes(stem: str):
                 "characters": cue.get("characters", ["Lin Feng", "Shen Qingyan"] if idx % 2 == 0 else ["Elder Gu", "Teacher Qin"]),
             })
     else:
-        # Fallback default dramatic scenes
+        # Fallback default dramatic scenes with friendly conversational Hindi & Indian names
         scenes = [
             {
                 "id": "001",
@@ -452,13 +908,13 @@ def get_episode_scenes(stem: str):
                 "start": 0.0,
                 "end": 60.0,
                 "duration": 60.0,
-                "chinese": "林枫！今日你勾结外道，罪不容诛！受死吧！",
-                "hindi": "उस रात लिन फेंग को पहली बार अपनी ही सेक्ट के गद्दार एल्डर्स के असली चेहरे का एहसास हुआ...",
+                "chinese": "反差极强的校花同桌是种什么体验前一秒他还在课堂上认真听课下一秒忽然就抱着我舌吻起来这一幕让全班三十亿男生集体破防",
+                "hindi": "अरे भाई! ज़रा सोचो, तुम्हारी क्लास की सबसे शांत और सुंदर लड़की, जो अभी चुपचाप पढ़ रही थी, अचानक सबके सामने आकर तुम्हें गले लगा ले और किस कर दे! भाई साहब, पूरी क्लास के लड़कों का तो दिमाग ही हिल गया!",
                 "camera": "Close Up",
                 "motion": "Slow Zoom",
                 "bgm": "Dark Tension",
                 "sfx": "Thunder Strike",
-                "characters": ["Lin Feng", "Elder Gu"],
+                "characters": ["Veer (वीर)", "Siya (सिया)"],
             },
             {
                 "id": "002",
@@ -468,12 +924,12 @@ def get_episode_scenes(stem: str):
                 "end": 120.0,
                 "duration": 60.0,
                 "chinese": "哈哈哈！既然你们不仁，就休怪我九霄剑煞无情！",
-                "hindi": "लेकिन उसने घुटने टेकने से इनकार कर दिया। अपनी तलवार को हवा में लहराते हुए उसने अंतिम शक्ति को जगाया!",
+                "hindi": "लेकिन भाई हमारे हीरो वीर ने भी हार नहीं मानी! अपनी तलवार हवा में लहराते हुए उसने गद्दारों को ललकारा कि अब तुम्हारी शामत आ गई है!",
                 "camera": "Low Angle Dynamic",
                 "motion": "Parallax Pan",
                 "bgm": "Epic Climax",
                 "sfx": "Sword Slash",
-                "characters": ["Lin Feng"],
+                "characters": ["Veer (वीर)"],
             },
             {
                 "id": "003",
@@ -483,12 +939,12 @@ def get_episode_scenes(stem: str):
                 "end": 180.0,
                 "duration": 60.0,
                 "chinese": "这股力量...难道是传说中的太古九霄炎？！不可能！",
-                "hindi": "एल्डर गू की आंखें खौफ से फटी की फटी रह गईं। वह नीली आग साधारण आग नहीं, बल्कि अमर लोक की दिव्य ज्वाला थी!",
+                "hindi": "गुरु भास्कर की तो आँखें खौफ से फटी की फटी रह गईं! वो नीली आग कोई मामूली आग नहीं, बल्कि अमर लोक की दिव्य ज्वाला थी!",
                 "camera": "Wide Shot",
                 "motion": "Camera Shake",
                 "bgm": "High Stakes Cultivation",
                 "sfx": "Energy Blast",
-                "characters": ["Elder Gu"],
+                "characters": ["Guru Bhaskar (गुरु भास्कर)"],
             },
         ]
 
@@ -572,40 +1028,40 @@ def get_characters():
     default_chars = [
         {
             "id": "CHAR_001",
-            "name": "Lin Feng (林枫)",
-            "role": "Protagonist",
-            "age": 17,
-            "hair": "Midnight black, swept back with cyan jade ribbon",
-            "eyes": "Glowing golden spiritual pupils",
-            "clothing": "Azure battle robes with celestial cloud stitching",
-            "weapon": "Heavenly Flame Sword (Nine Heavens Flame)",
-            "personality": "Calculative, ruthless to enemies, fiercely loyal to allies",
-            "power_realm": "Golden Core (Peak Rebirth)",
-            "consistency_prompt": "Handsome young male cultivation master, sharp masculine facial features, glowing golden eyes, azure battle robes, celestial flames, dynamic stance, anime manhua 3D render style"
+            "name": "Veer (वीर)",
+            "role": "Protagonist (Hero)",
+            "age": 18,
+            "hair": "Midnight black, dynamic anime styling",
+            "eyes": "Glowing golden celestial aura",
+            "clothing": "Azure battle robes with gold trims",
+            "weapon": "Heavenly Flame Sword (दिव्य अग्नि तलवार)",
+            "personality": "Witty, confident, unstoppable in battle, fiercely protective",
+            "power_realm": "Golden Core Peak",
+            "consistency_prompt": "Handsome young Indian-styled anime hero, sharp masculine facial features, glowing golden eyes, azure battle robes with gold celestial flames, dynamic fighting stance, 3D anime manhua render"
         },
         {
             "id": "CHAR_002",
-            "name": "Su Yan (苏嫣)",
-            "role": "Female Lead",
+            "name": "Siya (सिया)",
+            "role": "Female Lead (Heroine)",
             "age": 18,
             "hair": "Silken white hair tied with frost crystal pins",
             "eyes": "Sapphire blue translucent eyes",
             "clothing": "Snow-white silk immortal dress with silver embroidery",
             "weapon": "Frost Lotus Bell",
-            "personality": "Cold and quiet, possesses ancient Ice Phoenix bloodline",
+            "personality": "School queen, secretly deeply in love with Veer, sweet and brave",
             "power_realm": "Nascent Soul Initial",
             "consistency_prompt": "Stunningly beautiful immortal maiden, snow-white silk robes, icy blue eyes, ethereal glowing lotus aura, delicate jade earrings, celestial anime aesthetic"
         },
         {
             "id": "CHAR_003",
-            "name": "Elder Gu (顾长老)",
-            "role": "Primary Antagonist",
-            "age": 65,
+            "name": "Guru Bhaskar (गुरु भास्कर)",
+            "role": "Primary Antagonist (Villain)",
+            "age": 60,
             "hair": "Graying wispy hair, gaunt wrinkled face",
             "eyes": "Onyx serpent slit eyes",
             "clothing": "Crimson and black demon scholar robes",
             "weapon": "Nine-Bone Soul Banner",
-            "personality": "Treacherous, covets Lin Feng's rebirth secrets",
+            "personality": "Greedy, treacherous, jealous of Veer's rebirth powers",
             "power_realm": "Half-Step Soul Transformation",
             "consistency_prompt": "Menacing elderly demonic elder, sinister sneer, crimson and black robes, glowing dark mist, holding skeletal staff, villain anime manhua style"
         }
@@ -876,18 +1332,26 @@ class VoiceSynthesizeRequest(BaseModel):
 @app.post("/api/voice/synthesize")
 async def synthesize_voice_preview(req: VoiceSynthesizeRequest):
     config = load_config(DEFAULT_CONFIG_PATH)
-    preview_dir = os.path.join(config["storage_paths"]["tts"], ".preview")
+    tts_dir = config["storage_paths"]["tts"]
+    if not os.path.isabs(tts_dir):
+        tts_dir = os.path.join(BASE_DIR, tts_dir)
+    preview_dir = os.path.join(tts_dir, ".preview")
     os.makedirs(preview_dir, exist_ok=True)
-    out_wav = os.path.join(preview_dir, "preview.wav")
+    out_mp3 = os.path.join(preview_dir, "preview.mp3")
 
     try:
         import edge_tts
-        communicate = edge_tts.Communicate(req.text, "hi-IN-MadhurNeural", rate="+5%")
-        await communicate.save(out_wav)
+        voice_choice = "hi-IN-MadhurNeural"
+        if req.emotion == "female" or "female" in (req.name or "").lower():
+            voice_choice = "hi-IN-SwaraNeural"
+        rate_str = "+5%" if (req.speed or 1.0) >= 1.0 else "-5%"
+        communicate = edge_tts.Communicate(req.text, voice_choice, rate=rate_str)
+        await communicate.save(out_mp3)
+        dur = _get_audio_duration(out_mp3)
         return {
             "status": "success",
-            "duration": 4.5,
-            "audio_url": "/api/voice/preview_audio",
+            "duration": dur,
+            "audio_url": f"/api/voice/preview_audio?t={int(time.time())}",
             "engine_used": req.engine
         }
     except Exception as exc:
@@ -897,10 +1361,16 @@ async def synthesize_voice_preview(req: VoiceSynthesizeRequest):
 @app.get("/api/voice/preview_audio")
 def get_preview_audio():
     config = load_config(DEFAULT_CONFIG_PATH)
-    out_wav = os.path.join(config["storage_paths"]["tts"], ".preview", "preview.wav")
-    if not os.path.isfile(out_wav):
-        raise HTTPException(status_code=404, detail="Preview audio not generated yet.")
-    return FileResponse(out_wav, media_type="audio/wav")
+    tts_dir = config["storage_paths"]["tts"]
+    if not os.path.isabs(tts_dir):
+        tts_dir = os.path.join(BASE_DIR, tts_dir)
+    out_mp3 = os.path.join(tts_dir, ".preview", "preview.mp3")
+    out_wav = os.path.join(tts_dir, ".preview", "preview.wav")
+    if os.path.isfile(out_mp3):
+        return FileResponse(out_mp3, media_type="audio/mpeg")
+    elif os.path.isfile(out_wav):
+        return FileResponse(out_wav, media_type="audio/wav")
+    raise HTTPException(status_code=404, detail="Preview audio not generated yet.")
 
 
 # --------------------------------------------------------------------------- #
@@ -1104,12 +1574,88 @@ class ScreenWatermarkRequest(BaseModel):
     url: str
 
 
+@app.get("/api/media/image_proxy")
+def proxy_image(url: str = Query(...)):
+    """Proxy external images (like Bilibili hdslb.com) with proper referer to bypass 403."""
+    if not url or not url.startswith("http"):
+        raise HTTPException(status_code=400, detail="Invalid URL")
+    import requests
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Referer": "https://www.bilibili.com/",
+    }
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code == 200:
+            content_type = r.headers.get("content-type", "image/jpeg")
+            return Response(content=r.content, media_type=content_type)
+        else:
+            raise HTTPException(status_code=r.status_code, detail="Failed to fetch upstream image")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
 @app.get("/api/discovery/daily_suggestions")
-def get_daily_3d_suggestions():
+def get_daily_3d_suggestions(genre: Optional[str] = None, refresh: bool = False, count: int = 6):
     return {
         "status": "success",
-        "suggestions": discovery.generate_daily_3d_suggestions(),
+        "suggestions": discovery.generate_daily_3d_suggestions(genre=genre, refresh=refresh, count=count),
     }
+
+
+@app.post("/api/discovery/auto_scan_short_series")
+def auto_scan_short_series(genre: Optional[str] = None, count: int = 6):
+    """Auto-scan Bilibili for genuine serialized 3D short-episode series (1.5 - 3.5 min/ep)."""
+    try:
+        suggestions = discovery.auto_scan_short_3d_manhua_series(genre=genre, count=count)
+        return {
+            "status": "success",
+            "count": len(suggestions),
+            "suggestions": suggestions,
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+class AddCustomSeriesRequest(BaseModel):
+    title: str
+    url: str
+    category: Optional[str] = "কাস্টম ড্রামা"
+    hook: Optional[str] = None
+    episodes_est: Optional[str] = "৫০ পর্ব • প্রতিটি ২-৩ মিনিট"
+    genre: Optional[str] = "all"
+    icon: Optional[str] = "🎬"
+
+
+
+@app.get("/api/discovery/custom_series")
+def list_custom_series():
+    return {"status": "success", "series": discovery.load_custom_series()}
+
+
+@app.post("/api/discovery/custom_series")
+def add_custom_series(req: AddCustomSeriesRequest):
+    import uuid
+    existing = discovery.load_custom_series()
+    new_item = {
+        "id": f"custom_{uuid.uuid4().hex[:8]}",
+        "title": req.title.strip(),
+        "bengali_title": req.title.strip(),
+        "chinese_title": req.title.strip(),
+        "query": req.url.strip(),
+        "url": req.url.strip(),
+        "category": req.category or "কাস্টম ড্রামা",
+        "hook": req.hook or "ইউজার কর্তৃক যুক্ত করা ড্রামা সিরিজ।",
+        "bengali_hook": req.hook or "ইউজার কর্তৃক যুক্ত করা ড্রামা সিরিজ।",
+        "episodes_est": req.episodes_est or "২৫ পর্ব • ১.৫ ঘণ্টা সিনেমা",
+        "target_audience": "কাস্টম সিলেকশন",
+        "genre": req.genre or "all",
+        "icon": req.icon or "🎬",
+        "thumbnail": None,
+    }
+    existing.insert(0, new_item)
+    discovery.save_custom_series(existing)
+    return {"status": "success", "item": new_item}
 
 
 @app.post("/api/discovery/search_3d")
@@ -1259,6 +1805,7 @@ class DownloadRequest(BaseModel):
     query_or_url: str
     limit: Optional[int] = None
     cookies: Optional[str] = None
+    archive_previous: bool = False
 
 
 class PipelineRunRequest(BaseModel):
@@ -1275,17 +1822,102 @@ def get_pipeline_status():
     return _PIPELINE_STATE
 
 
-def _run_download_task(query_or_url: str, limit: Optional[int], cookies: Optional[str]):
+def _make_dl_progress_callback(is_autopilot: bool = False):
+    import re
+    state = {
+        "current_item": 1,
+        "total_items": 1,
+        "is_playlist": False,
+        "last_logged_item": 0,
+    }
+
+    def on_dl_progress(line: str):
+        _add_log(line)
+
+        # Detect playlist item progression (e.g. "Downloading item 2 of 25" or "Downloading video 3 of 10")
+        m_item = re.search(r"Downloading (?:item|video)\s+(\d+)\s+of\s+(\d+)", line, re.IGNORECASE)
+        if m_item:
+            state["current_item"] = int(m_item.group(1))
+            state["total_items"] = int(m_item.group(2))
+            state["is_playlist"] = True
+            if state["current_item"] != state["last_logged_item"]:
+                state["last_logged_item"] = state["current_item"]
+                _add_log(f"📥 [{state['current_item']}/{state['total_items']}] পর্ব {state['current_item']} ডাউনলোড শুরু হচ্ছে...")
+
+        # Also inspect destination filename for 5-digit index (e.g., 00003_xxx.mp4)
+        m_dest = re.search(r"Destination:.*?(\d{5})_", line)
+        if m_dest:
+            idx = int(m_dest.group(1))
+            state["current_item"] = max(state["current_item"], idx)
+            state["is_playlist"] = True
+
+        m_pct = re.search(r"(\d+(?:\.\d+)?)%", line)
+        m_speed = re.search(r"at\s+([\d\.]+\s*[kKmMgG]i?B/s)", line)
+        if not m_speed:
+            m_aria_speed = re.search(r"DL:([\d\.]+\s*[kKmMgG]i?B)", line)
+            speed_str = (m_aria_speed.group(1) + "/s") if m_aria_speed else ""
+        else:
+            speed_str = m_speed.group(1)
+
+        m_conn = re.search(r"CN:(\d+)", line)
+        conn_str = f"{m_conn.group(1)} threads" if m_conn else "16 threads"
+        m_eta = re.search(r"ETA:?([0-9a-zA-Z:]+)", line)
+        eta_str = f"ETA {m_eta.group(1)}" if m_eta else ""
+
+        status_meta = " | ".join(filter(None, [speed_str, conn_str if speed_str else "", eta_str]))
+
+        item_pct = float(m_pct.group(1)) if m_pct else 0.0
+
+        if state["is_playlist"] and state["total_items"] > 1:
+            ep_tag = f"পর্ব {state['current_item']}/{state['total_items']}"
+            fraction = ((state["current_item"] - 1) + (item_pct / 100.0)) / max(1, state["total_items"])
+            overall_pct = fraction * 100.0
+        else:
+            ep_tag = "ফুল ড্রামা সংকলন"
+            overall_pct = item_pct
+
+        with _PIPELINE_LOCK:
+            if is_autopilot:
+                _PIPELINE_STATE["progress_percent"] = round(5.0 + (overall_pct * 0.18), 1)
+                prefix = "Step 1/6: "
+            else:
+                _PIPELINE_STATE["progress_percent"] = round(overall_pct, 1)
+                prefix = ""
+
+            meta_suffix = f" | {status_meta}" if status_meta else ""
+            _PIPELINE_STATE["current_stage"] = (
+                f"{prefix}⚡ Downloading [{ep_tag}] ({item_pct:.0f}%{meta_suffix})"
+            )
+
+    return on_dl_progress
+
+
+def _run_download_task(query_or_url: str, limit: Optional[int], cookies: Optional[str], archive_previous: bool = False):
     global _PIPELINE_STATE
     config = load_config(DEFAULT_CONFIG_PATH)
     raw_dir = config["storage_paths"]["raw"]
+    import re
+
+    if archive_previous:
+        try:
+            status = workspace_manager.get_active_workspace_status()
+            if status["has_active_assets"]:
+                _add_log("🗄️ Archiving previous drama files to ensure 100% clean isolation...")
+                arc_res = workspace_manager.archive_and_reset_workspace(query_or_url)
+                _add_log(arc_res.get("message", "Archived previous drama."))
+        except Exception as arc_err:
+            _add_log(f"Archive notice: {arc_err}")
+
     with _PIPELINE_LOCK:
         _PIPELINE_STATE["is_running"] = True
         _PIPELINE_STATE["job_type"] = "download"
-        _PIPELINE_STATE["current_stage"] = "Downloading Playlist"
+        _PIPELINE_STATE["progress_percent"] = 5.0
+        _PIPELINE_STATE["current_stage"] = "Step 1/1: Downloading Series Playlist..."
         _PIPELINE_STATE["started_at"] = time.time()
         _PIPELINE_STATE["last_error"] = None
-        _add_log(f"Starting download for: {query_or_url[:60]}")
+        _add_log(f"📥 Starting queue download for: {query_or_url[:60]}")
+
+    on_dl_progress = _make_dl_progress_callback(is_autopilot=False)
 
     try:
         paths = downloader.download_series_by_query(
@@ -1293,8 +1925,12 @@ def _run_download_task(query_or_url: str, limit: Optional[int], cookies: Optiona
             raw_dir,
             limit=limit,
             cookies_from_browser=cookies,
+            progress_callback=on_dl_progress,
         )
-        _add_log(f"Downloaded {len(paths)} episodes into {raw_dir}")
+        with _PIPELINE_LOCK:
+            _PIPELINE_STATE["progress_percent"] = 100.0
+            _PIPELINE_STATE["current_stage"] = f"✅ Downloaded {len(paths)} Episodes"
+        _add_log(f"✅ Download complete! Sourced {len(paths)} episodes into raw queue.")
     except Exception as exc:
         _add_log(f"Download error: {exc}")
         _PIPELINE_STATE["last_error"] = str(exc)
@@ -1302,15 +1938,193 @@ def _run_download_task(query_or_url: str, limit: Optional[int], cookies: Optiona
         with _PIPELINE_LOCK:
             _PIPELINE_STATE["is_running"] = False
             _PIPELINE_STATE["job_type"] = "idle"
-            _PIPELINE_STATE["current_stage"] = "Done"
+
+
+class AutoProduceRequest(BaseModel):
+    query_or_url: str
+    limit: Optional[int] = 25
+    cookies: Optional[str] = None
+    enable_filler_trim: bool = False
+    generate_shorts: bool = True
+    archive_previous: bool = True
+
+
+def _run_autopilot_task(req: AutoProduceRequest):
+    global _PIPELINE_STATE
+    config = load_config(DEFAULT_CONFIG_PATH)
+    raw_dir = config["storage_paths"]["raw"]
+    import re
+    import subprocess
+
+    query_str = (req.query_or_url or "").strip().lower()
+    is_local_request = (
+        query_str in ("local_imported_series", "local", "local_episodes", "imported", "local_render")
+        or query_str.startswith("local_")
+        or not query_str
+    )
+
+    if is_local_request:
+        _add_log("🎬 [Local Production] Processing imported local episodes directly (Bypassing download & preserving files)...")
+        run_req = PipelineRunRequest(
+            limit=req.limit,
+            enable_filler_trim=req.enable_filler_trim,
+            generate_shorts=req.generate_shorts,
+            carry_context=True,
+        )
+        _run_pipeline_task(run_req)
+        return
+
+    if req.archive_previous:
+        try:
+            status = workspace_manager.get_active_workspace_status()
+            if status["has_active_assets"]:
+                _add_log("🗄️ Auto-archiving previous project files to avoid cross-contamination...")
+                arc_res = workspace_manager.archive_and_reset_workspace(req.query_or_url)
+                _add_log(arc_res.get("message", "Previous project safely archived."))
+        except Exception as arc_err:
+            _add_log(f"Archive notice: {arc_err}")
+
+    with _PIPELINE_LOCK:
+        _PIPELINE_STATE["is_running"] = True
+        _PIPELINE_STATE["job_type"] = "autopilot"
+        _PIPELINE_STATE["progress_percent"] = 5.0
+        _PIPELINE_STATE["current_stage"] = "Step 1/6: Downloading Full Season Episodes..."
+        _PIPELINE_STATE["started_at"] = time.time()
+        _PIPELINE_STATE["last_error"] = None
+        _add_log(f"🎬 [1-Click Boss AutoPilot] Initiating full production for: {req.query_or_url[:60]}")
+
+    try:
+        limit_val = req.limit or 25
+        _add_log(f"⚡ [Concurrent Streaming Engine] Sourcing & streaming episodes for: {req.query_or_url[:60]}")
+        _add_log("⚡ Episodes download concurrently in the background while RTX 4060 GPU immediately processes completed episodes!")
+
+        with _PIPELINE_LOCK:
+            _PIPELINE_STATE["progress_percent"] = 10.0
+            _PIPELINE_STATE["current_stage"] = "Streaming Pipeline: Concurrent Download & GPU Processing"
+
+        cmd = [
+            PYTHON_EXEC,
+            "-u",
+            "pipeline.py",
+            "--stream-download",
+            req.query_or_url,
+            "--carry-context",
+            "--device",
+            "cuda",
+        ]
+        if req.limit:
+            cmd += ["--limit", str(req.limit)]
+        if req.cookies:
+            cmd += ["--cookies", str(req.cookies)]
+        if req.enable_filler_trim:
+            cmd += ["--enable-filler-trim"]
+        if req.generate_shorts:
+            cmd += ["--generate-shorts"]
+
+        proc = subprocess.Popen(
+            cmd,
+            cwd=BASE_DIR,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        _ACTIVE_SUBPROCESSES.append(proc)
+        for line in iter(proc.stdout.readline, ""):
+            clean = line.strip()
+            if clean:
+                _add_log(clean)
+                clow = clean.lower()
+                with _PIPELINE_LOCK:
+                    if "stream downloader" in clow or "yt-dlp" in clow or "aria2" in clow or "download" in clow:
+                        if _PIPELINE_STATE["progress_percent"] < 25.0:
+                            _PIPELINE_STATE["current_stage"] = "Step 1/6: Background Streaming Download Active"
+                            _PIPELINE_STATE["progress_percent"] = 15.0
+                    elif "separate" in clow or "demucs" in clow:
+                        _PIPELINE_STATE["current_stage"] = "Step 2/6: Vocal Separation (Demucs CUDA)"
+                        _PIPELINE_STATE["progress_percent"] = 30.0
+                    elif "transcribe" in clow or "sensevoice" in clow:
+                        _PIPELINE_STATE["current_stage"] = "Step 3/6: Speech Recognition (SenseVoice ASR)"
+                        _PIPELINE_STATE["progress_percent"] = 45.0
+                    elif "translate" in clow or "gemini" in clow:
+                        _PIPELINE_STATE["current_stage"] = "Step 4/6: Story Recap (Gemini Hindi Recap)"
+                        _PIPELINE_STATE["progress_percent"] = 60.0
+                    elif "tts" in clow or "f5-tts" in clow:
+                        _PIPELINE_STATE["current_stage"] = "Step 5/6: Voice Dubbing (F5-TTS)"
+                        _PIPELINE_STATE["progress_percent"] = 75.0
+                    elif "render" in clow or "remaster" in clow or "nvenc" in clow:
+                        _PIPELINE_STATE["current_stage"] = "Step 6/6: Video Remaster & Mix (FFmpeg NVENC)"
+                        _PIPELINE_STATE["progress_percent"] = 88.0
+                    elif "merging" in clow or "concatenat" in clow:
+                        _PIPELINE_STATE["current_stage"] = "Step 6/6: Master Movie Concat (-c copy)"
+                        _PIPELINE_STATE["progress_percent"] = 93.0
+                    elif "short" in clow:
+                        _PIPELINE_STATE["current_stage"] = "Bonus: Generating Viral 9:16 Shorts"
+                        _PIPELINE_STATE["progress_percent"] = 97.0
+        proc.wait()
+        if proc.returncode == 0:
+            _add_log("🎉 [1-Click Boss AutoPilot] COMPLETE! 1-2 Hour Full Movie created successfully!")
+            with _PIPELINE_LOCK:
+                _PIPELINE_STATE["current_stage"] = "🎉 Completed! Full Season Movie Ready!"
+                _PIPELINE_STATE["progress_percent"] = 100.0
+        else:
+            _add_log(f"Pipeline process returned error code {proc.returncode}")
+            _PIPELINE_STATE["last_error"] = f"Pipeline returned error code {proc.returncode}"
+    except Exception as exc:
+        _add_log(f"AutoPilot failed: {exc}")
+        _PIPELINE_STATE["last_error"] = str(exc)
+    finally:
+        with _PIPELINE_LOCK:
+            _PIPELINE_STATE["is_running"] = False
+            _PIPELINE_STATE["job_type"] = "idle"
+
+
+@app.post("/api/pipeline/autopilot")
+def start_autopilot(req: AutoProduceRequest, background_tasks: BackgroundTasks):
+    if _PIPELINE_STATE["is_running"]:
+        raise HTTPException(status_code=409, detail="A pipeline job is already in progress.")
+    background_tasks.add_task(_run_autopilot_task, req)
+    return {"message": "1-Click AutoPilot started in background.", "target": req.query_or_url}
 
 
 @app.post("/api/pipeline/download")
 def start_download(req: DownloadRequest, background_tasks: BackgroundTasks):
     if _PIPELINE_STATE["is_running"]:
         raise HTTPException(status_code=409, detail="A pipeline job is already in progress.")
-    background_tasks.add_task(_run_download_task, req.query_or_url, req.limit, req.cookies)
+    background_tasks.add_task(_run_download_task, req.query_or_url, req.limit, req.cookies, req.archive_previous)
     return {"message": "Download task queued in background.", "target": req.query_or_url}
+
+
+@app.post("/api/pipeline/stop")
+def stop_pipeline():
+    global _PIPELINE_STATE, _ACTIVE_SUBPROCESSES
+    import subprocess
+    for proc in list(_ACTIVE_SUBPROCESSES):
+        try:
+            if proc.poll() is None:
+                if sys.platform == "win32":
+                    subprocess.run(["taskkill", "/F", "/PID", str(proc.pid), "/T"], capture_output=True)
+                else:
+                    proc.terminate()
+        except Exception:
+            pass
+    _ACTIVE_SUBPROCESSES.clear()
+
+    try:
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/F", "/IM", "yt-dlp.exe", "/T"], capture_output=True)
+            subprocess.run(["taskkill", "/F", "/IM", "aria2c.exe", "/T"], capture_output=True)
+            subprocess.run(["taskkill", "/F", "/IM", "ffmpeg.exe", "/T"], capture_output=True)
+    except Exception:
+        pass
+    with _PIPELINE_LOCK:
+        _PIPELINE_STATE["is_running"] = False
+        _PIPELINE_STATE["job_type"] = "idle"
+        _PIPELINE_STATE["current_stage"] = "Stopped by user"
+        _PIPELINE_STATE["last_error"] = "Job cancelled."
+        _add_log("⏹️ Pipeline stopped by user.")
+    return {"status": "stopped"}
 
 
 def _run_pipeline_task(req: PipelineRunRequest):
@@ -1325,7 +2139,7 @@ def _run_pipeline_task(req: PipelineRunRequest):
         _PIPELINE_STATE["last_error"] = None
         _add_log("Master pipeline initiated.")
 
-    cmd = [sys.executable, "pipeline.py"]
+    cmd = [PYTHON_EXEC, "-u", "pipeline.py", "--device", "cuda"]
     if req.limit:
         cmd += ["--limit", str(req.limit)]
     if req.force:
@@ -1349,31 +2163,46 @@ def _run_pipeline_task(req: PipelineRunRequest):
             encoding="utf-8",
             errors="replace",
         )
+        _ACTIVE_SUBPROCESSES.append(proc)
         for line in iter(proc.stdout.readline, ""):
             clean = line.strip()
             if clean:
                 _add_log(clean)
-                if "separate" in clean.lower():
-                    _PIPELINE_STATE["current_stage"] = "Audio Separation (Demucs CUDA)"
-                elif "transcribe" in clean.lower():
-                    _PIPELINE_STATE["current_stage"] = "Speech Recognition (SenseVoice ASR)"
-                elif "translate" in clean.lower():
-                    _PIPELINE_STATE["current_stage"] = "Recap Story Adaptation (Gemini)"
-                elif "tts" in clean.lower():
-                    _PIPELINE_STATE["current_stage"] = "Voice Cloning & Warping (F5-TTS)"
-                elif "filler trim" in clean.lower():
-                    _PIPELINE_STATE["current_stage"] = "Smart Filler Trimming (0.4s Cushioned)"
-                elif "render" in clean.lower():
-                    _PIPELINE_STATE["current_stage"] = "Video Remaster & Mix (FFmpeg)"
-                elif "merging" in clean.lower() or "concatenat" in clean.lower():
-                    _PIPELINE_STATE["current_stage"] = "Master Concatenation (-c copy)"
-                elif "short" in clean.lower():
-                    _PIPELINE_STATE["current_stage"] = "Viral Shorts Generation (9:16 Vertical)"
+                clow = clean.lower()
+                with _PIPELINE_LOCK:
+                    if "separate" in clow:
+                        _PIPELINE_STATE["current_stage"] = "Step 1/6: Audio Separation (Demucs CUDA)"
+                        _PIPELINE_STATE["progress_percent"] = 20.0
+                    elif "transcribe" in clow:
+                        _PIPELINE_STATE["current_stage"] = "Step 2/6: Speech Recognition (SenseVoice ASR)"
+                        _PIPELINE_STATE["progress_percent"] = 35.0
+                    elif "translate" in clow:
+                        _PIPELINE_STATE["current_stage"] = "Step 3/6: Recap Story Adaptation (Gemini)"
+                        _PIPELINE_STATE["progress_percent"] = 50.0
+                    elif "tts" in clow:
+                        _PIPELINE_STATE["current_stage"] = "Step 4/6: Voice Cloning (F5-TTS)"
+                        _PIPELINE_STATE["progress_percent"] = 65.0
+                    elif "filler trim" in clow:
+                        _PIPELINE_STATE["current_stage"] = "Step 5/6: Smart Filler Trimming"
+                        _PIPELINE_STATE["progress_percent"] = 75.0
+                    elif "render" in clow or "remaster" in clow:
+                        _PIPELINE_STATE["current_stage"] = "Step 6/6: Video Remaster & Mix (FFmpeg)"
+                        _PIPELINE_STATE["progress_percent"] = 85.0
+                    elif "merging" in clow or "concatenat" in clow:
+                        _PIPELINE_STATE["current_stage"] = "Step 6/6: Master Concatenation (-c copy)"
+                        _PIPELINE_STATE["progress_percent"] = 92.0
+                    elif "short" in clow:
+                        _PIPELINE_STATE["current_stage"] = "Bonus: Viral Shorts Generation (9:16 Vertical)"
+                        _PIPELINE_STATE["progress_percent"] = 97.0
         proc.wait()
         if proc.returncode == 0:
             _add_log("Pipeline completed successfully! Master movie created.")
+            with _PIPELINE_LOCK:
+                _PIPELINE_STATE["progress_percent"] = 100.0
+                _PIPELINE_STATE["current_stage"] = "🎉 Completed! Master Movie Ready!"
         else:
             _add_log(f"Pipeline process returned error code {proc.returncode}")
+            _PIPELINE_STATE["last_error"] = f"Pipeline process returned error code {proc.returncode}"
     except Exception as exc:
         _add_log(f"Execution failed: {exc}")
         _PIPELINE_STATE["last_error"] = str(exc)
@@ -1381,7 +2210,6 @@ def _run_pipeline_task(req: PipelineRunRequest):
         with _PIPELINE_LOCK:
             _PIPELINE_STATE["is_running"] = False
             _PIPELINE_STATE["job_type"] = "idle"
-            _PIPELINE_STATE["current_stage"] = "Completed"
 
 
 @app.post("/api/pipeline/run")

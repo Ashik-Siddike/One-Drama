@@ -1,0 +1,46 @@
+{
+  "drama_title": "夺风华",
+  "sheet_image": "E:\\projects\\WeeklyProject\\OneDrama\\one_drama_engine\\storage\\characters\\character_lineup.jpg",
+  "characters": [
+    {
+      "id": "C1",
+      "role": "hero",
+      "name": "Li Mo",
+      "hindi_name": "ली मो",
+      "gender": "male",
+      "frame_index": 4,
+      "box_ymin": 185,
+      "box_xmin": 202,
+      "box_ymax": 321,
+      "box_xmax": 402,
+      "visual_summary": "Young male lead in black patterned silk robe, long dark hair"
+    },
+    {
+      "id": "C2",
+      "role": "heroine",
+      "name": "Su Wan",
+      "hindi_name": "सु वान",
+      "gender": "female",
+      "frame_index": 2,
+      "box_ymin": 76,
+      "box_xmin": 293,
+      "box_ymax": 464,
+      "box_xmax": 728,
+      "visual_summary": "Young female lead with intricate braided bun, white cloak and light blue embroidered dress"
+    },
+    {
+      "id": "C3",
+      "role": "father",
+      "name": "Emperor Zhao",
+      "hindi_name": "सम्राट झाओ",
+      "gender": "male",
+      "frame_index": 0,
+      "box_ymin": 218,
+      "box_xmin": 331,
+      "box_ymax": 435,
+      "box_xmax": 757,
+      "visual_summary": "Middle-aged emperor in ornate yellow dragon robe sitting on throne"
+    }
+  ],
+  "total_characters": 3
+}
